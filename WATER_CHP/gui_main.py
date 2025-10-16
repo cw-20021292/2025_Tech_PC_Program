@@ -63,6 +63,13 @@ class MainGUI:
             'cooling_additional_time': 0
         }
         
+        # 냉각 입력 필드가 포커스 중인지 추적
+        self.cooling_input_focus = {
+            'on_temp': False,
+            'off_temp': False,
+            'cooling_additional_time': False
+        }
+        
         # 제빙시스템
         self.icemaking_data = {
             'operation': '대기',
@@ -123,6 +130,13 @@ class MainGUI:
         # GUI 위젯 참조
         self.nos_valve_labels = {}
         self.feed_valve_labels = {}
+        # 냉동검토용 탭 전용 라벨
+        self.nos_valve_labels_freezing = {}
+        self.feed_valve_labels_freezing = {}
+        # 제어검토용 탭 전용 라벨
+        self.nos_valve_labels_control = {}
+        self.feed_valve_labels_control = {}
+        
         self.sensor_labels = {}
         self.hvac_labels = {}
         self.cooling_labels = {}
@@ -265,34 +279,123 @@ class MainGUI:
                                                          width=8, relief="raised")
         self.cooling_labels['operation_state'].pack(side=tk.LEFT, padx=(2, 0))
         
-        # ON 온도
+        # ON 온도 (입력 가능)
         on_temp_frame = ttk.Frame(cooling_frame)
         on_temp_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(on_temp_frame, text="ON 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.cooling_labels['on_temp'] = tk.Label(on_temp_frame, text="0", 
-                                                 font=("Arial", 8), bg="white", relief="sunken", width=6)
+        
+        # 숫자만 입력 가능한 Entry
+        vcmd_temp = (self.root.register(self.validate_number), '%P')
+        self.cooling_labels['on_temp'] = tk.Entry(on_temp_frame, font=("Arial", 8), 
+                                                  width=6, validate='key', validatecommand=vcmd_temp)
+        self.cooling_labels['on_temp'].insert(0, "0")
         self.cooling_labels['on_temp'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(on_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
         
-        # OFF 온도
+        # 포커스 이벤트 바인딩
+        self.cooling_labels['on_temp'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('on_temp', True))
+        self.cooling_labels['on_temp'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('on_temp', False))
+        
+        # OFF 온도 (입력 가능)
         off_temp_frame = ttk.Frame(cooling_frame)
         off_temp_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(off_temp_frame, text="OFF 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.cooling_labels['off_temp'] = tk.Label(off_temp_frame, text="0", 
-                                                  font=("Arial", 8), bg="white", relief="sunken", width=6)
+        self.cooling_labels['off_temp'] = tk.Entry(off_temp_frame, font=("Arial", 8), 
+                                                   width=6, validate='key', validatecommand=vcmd_temp)
+        self.cooling_labels['off_temp'].insert(0, "0")
         self.cooling_labels['off_temp'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(off_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
         
-        # 냉각 추가시간
+        self.cooling_labels['off_temp'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('off_temp', True))
+        self.cooling_labels['off_temp'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('off_temp', False))
+        
+        # 냉각 추가시간 (입력 가능)
         add_time_frame = ttk.Frame(cooling_frame)
         add_time_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(add_time_frame, text="추가시간:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.cooling_labels['cooling_additional_time'] = tk.Label(add_time_frame, text="0", 
-                                                                 font=("Arial", 8), bg="white", relief="sunken", width=6)
+        self.cooling_labels['cooling_additional_time'] = tk.Entry(add_time_frame, font=("Arial", 8), 
+                                                                  width=6, validate='key', validatecommand=vcmd_temp)
+        self.cooling_labels['cooling_additional_time'].insert(0, "0")
         self.cooling_labels['cooling_additional_time'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(add_time_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT)
         
+        self.cooling_labels['cooling_additional_time'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('cooling_additional_time', True))
+        self.cooling_labels['cooling_additional_time'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('cooling_additional_time', False))
+        
+        # CMD 0xB1 전송 버튼
+        send_btn_frame = ttk.Frame(cooling_frame)
+        send_btn_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        self.cooling_send_btn = ttk.Button(send_btn_frame, text="CMD 0xB1 전송",
+                                          command=self.send_cooling_control, state="disabled")
+        self.cooling_send_btn.pack(fill=tk.X)
+        
         cooling_frame.columnconfigure(0, weight=1)
+    
+    def validate_number(self, value):
+        """숫자만 입력 가능하도록 검증"""
+        if value == "":
+            return True
+        try:
+            int(value)
+            return True
+        except ValueError:
+            return False
+    
+    def on_cooling_input_focus(self, field_name, has_focus):
+        """냉각 입력 필드 포커스 상태 추적"""
+        self.cooling_input_focus[field_name] = has_focus
+    
+    def send_cooling_control(self):
+        """냉각 제어 CMD 0xB1 전송"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        try:
+            # 입력 값 가져오기
+            on_temp_str = self.cooling_labels['on_temp'].get()
+            off_temp_str = self.cooling_labels['off_temp'].get()
+            add_time_str = self.cooling_labels['cooling_additional_time'].get()
+            
+            # 빈 값 체크
+            if not on_temp_str or not off_temp_str or not add_time_str:
+                messagebox.showwarning("경고", "모든 값을 입력해주세요.")
+                return
+            
+            # 정수 변환
+            on_temp = int(on_temp_str)
+            off_temp = int(off_temp_str)
+            add_time = int(add_time_str)
+            
+            # 범위 체크 (0~255)
+            if not (0 <= on_temp <= 255 and 0 <= off_temp <= 255 and 0 <= add_time <= 255):
+                messagebox.showwarning("경고", "값은 0~255 범위여야 합니다.")
+                return
+            
+            # DATA FIELD 구성 (3바이트)
+            data_field = bytearray(3)
+            data_field[0] = on_temp      # DATA 1: ON 온도
+            data_field[1] = off_temp     # DATA 2: OFF 온도
+            data_field[2] = add_time     # DATA 3: 추가시간
+            
+            # 로그 출력
+            hex_data = " ".join([f"{b:02X}" for b in data_field])
+            self.log_communication(f"[냉각 제어] CMD 0xB1 전송", "blue")
+            self.log_communication(f"  ON온도: {on_temp}℃, OFF온도: {off_temp}℃, 추가시간: {add_time}초", "gray")
+            self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
+            
+            # CMD 0xB1 패킷 전송
+            success, message = self.comm.send_packet(0xB1, bytes(data_field))
+            
+            if success:
+                self.log_communication(f"  전송 성공 (CMD 0xB1, 3바이트)", "green")
+            else:
+                self.log_communication(f"  전송 실패: {message}", "red")
+                
+        except ValueError:
+            messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+        except Exception as e:
+            self.log_communication(f"냉각 제어 오류: {str(e)}", "red")
     
     def create_hvac_area(self, parent):
         """공조시스템 섹션 생성"""
@@ -528,6 +631,12 @@ class MainGUI:
         valve_frame = ttk.LabelFrame(parent, text="밸브류", padding="3")
         valve_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
         
+        # 현재 몇 번째 생성인지 확인 (냉동검토용=1, 제어검토용=2)
+        if not hasattr(self, '_valve_creation_count'):
+            self._valve_creation_count = 0
+        self._valve_creation_count += 1
+        is_freezing_tab = self._valve_creation_count == 1
+        
         # NOS 밸브 서브프레임
         nos_frame = ttk.LabelFrame(valve_frame, text="NOS 밸브 (데이터 1=CLOSE, 0=OPEN)", padding="3")
         nos_frame.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=(0, 5))
@@ -548,7 +657,11 @@ class MainGUI:
             # 클릭 이벤트 바인딩 (밸브 제어 - 0xA0 전송)
             status_label.bind("<Button-1>", lambda e, valve_num=i: self.send_valve_control(valve_num, 'NOS'))
             
-            self.nos_valve_labels[i] = status_label
+            # 탭별로 라벨 저장
+            if is_freezing_tab:
+                self.nos_valve_labels_freezing[i] = status_label
+            else:
+                self.nos_valve_labels_control[i] = status_label
         
         # FEED 밸브 서브프레임
         feed_frame = ttk.LabelFrame(valve_frame, text="FEED 밸브 (데이터 1=OPEN, 0=CLOSE)", padding="3")
@@ -573,7 +686,11 @@ class MainGUI:
             # 클릭 이벤트 바인딩 (밸브 제어 - 0xA0 전송)
             status_label.bind("<Button-1>", lambda e, valve_num=i: self.send_valve_control(valve_num, 'FEED'))
             
-            self.feed_valve_labels[i] = status_label
+            # 탭별로 라벨 저장
+            if is_freezing_tab:
+                self.feed_valve_labels_freezing[i] = status_label
+            else:
+                self.feed_valve_labels_control[i] = status_label
         
         for i in range(5):
             nos_frame.columnconfigure(i, weight=1)
@@ -828,6 +945,10 @@ class MainGUI:
                 for btn in self.cmd_buttons.values():
                     btn.config(state="normal")
                 
+                # 냉각 제어 버튼 활성화
+                if hasattr(self, 'cooling_send_btn'):
+                    self.cooling_send_btn.config(state="normal")
+                
                 self.log_communication(f"포트 {port} 연결됨", "green")
             else:
                 self.log_communication(f"연결 실패: {message}", "red")
@@ -844,6 +965,10 @@ class MainGUI:
                 # CMD 버튼 비활성화
                 for btn in self.cmd_buttons.values():
                     btn.config(state="disabled")
+                
+                # 냉각 제어 버튼 비활성화
+                if hasattr(self, 'cooling_send_btn'):
+                    self.cooling_send_btn.config(state="disabled")
                 
                 self.log_communication("연결 해제됨", "orange")
     
@@ -1166,19 +1291,37 @@ class MainGUI:
     
     def update_gui(self):
         """GUI 업데이트"""
-        # NOS 밸브 상태 업데이트
+        # NOS 밸브 상태 업데이트 (양쪽 탭 모두)
         for valve_num, is_closed in self.nos_valve_states.items():
-            if valve_num in self.nos_valve_labels:
-                label = self.nos_valve_labels[valve_num]
+            # 냉동검토용 탭
+            if valve_num in self.nos_valve_labels_freezing:
+                label = self.nos_valve_labels_freezing[valve_num]
+                if is_closed:
+                    label.config(text="CLOSE", bg="red")
+                else:
+                    label.config(text="OPEN", bg="blue")
+            
+            # 제어검토용 탭
+            if valve_num in self.nos_valve_labels_control:
+                label = self.nos_valve_labels_control[valve_num]
                 if is_closed:
                     label.config(text="CLOSE", bg="red")
                 else:
                     label.config(text="OPEN", bg="blue")
         
-        # FEED 밸브 상태 업데이트
+        # FEED 밸브 상태 업데이트 (양쪽 탭 모두)
         for valve_num, is_open in self.feed_valve_states.items():
-            if valve_num in self.feed_valve_labels:
-                label = self.feed_valve_labels[valve_num]
+            # 냉동검토용 탭
+            if valve_num in self.feed_valve_labels_freezing:
+                label = self.feed_valve_labels_freezing[valve_num]
+                if is_open:
+                    label.config(text="OPEN", bg="blue")
+                else:
+                    label.config(text="CLOSE", bg="red")
+            
+            # 제어검토용 탭
+            if valve_num in self.feed_valve_labels_control:
+                label = self.feed_valve_labels_control[valve_num]
                 if is_open:
                     label.config(text="OPEN", bg="blue")
                 else:
@@ -1211,17 +1354,24 @@ class MainGUI:
                 else:
                     label.config(text=str(value))
         
-        # 냉각 시스템 상태 업데이트
+        # 냉각 시스템 상태 업데이트 (입력 중이 아닐 때만)
         for cooling_key, value in self.cooling_data.items():
             if cooling_key in self.cooling_labels:
-                label = self.cooling_labels[cooling_key]
+                widget = self.cooling_labels[cooling_key]
                 if cooling_key == 'operation_state':
+                    # 운전 상태는 Label
                     if value == 'GOING':
-                        label.config(text="GOING", bg="green")
+                        widget.config(text="GOING", bg="green")
                     else:
-                        label.config(text="STOP", bg="red")
-                else:
-                    label.config(text=str(value))
+                        widget.config(text="STOP", bg="red")
+                elif cooling_key in ['on_temp', 'off_temp', 'cooling_additional_time']:
+                    # Entry 위젯이고 포커스 중이 아닐 때만 업데이트
+                    if not self.cooling_input_focus.get(cooling_key, False):
+                        current_value = widget.get()
+                        new_value = str(value)
+                        if current_value != new_value:
+                            widget.delete(0, tk.END)
+                            widget.insert(0, new_value)
         
         # 제빙 시스템 상태 업데이트
         for ice_key, value in self.icemaking_data.items():
