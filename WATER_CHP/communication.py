@@ -29,7 +29,7 @@ class ProtocolHandler:
         0xA1: 1,
         0xB0: 5,
         0xB1: 5,   # 냉각 제어 (ON온도 정수부, ON온도 소수부, OFF온도 정수부, OFF온도 소수부, 추가시간)
-        0xB2: 5,
+        0xB2: 7,
         0xB3: 48,
         0xC0: 7
     }

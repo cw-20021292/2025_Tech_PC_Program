@@ -91,6 +91,16 @@ class MainGUI:
             'swing_on_time': 0,
             'swing_off_time': 0
         }
+
+        # 제빙 입력 모드 상태 추가 (냉각 입력 모드 변수 뒤에)
+        self.icemaking_edit_mode = False  # 입력 모드 활성화 여부
+        self.icemaking_temp_data = {
+            'operation': '대기',  # 대기/동작
+            'icemaking_time': 0,      # ms 단위 (0~65535)
+            'water_capacity': 0,      # Hz 단위 (0~65535)
+            'swing_on_time': 0,       # ms 단위 (0~255)
+            'swing_off_time': 0       # ms 단위 (0~255)
+        }
         
         # 드레인탱크
         self.drain_tank_data = {
@@ -330,7 +340,7 @@ class MainGUI:
         # CMD 0xB1 전송 버튼
         send_btn_frame = ttk.Frame(cooling_frame)
         send_btn_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
-        self.cooling_send_btn = ttk.Button(send_btn_frame, text="냉각 설정 입력 모드",
+        self.cooling_send_btn = ttk.Button(send_btn_frame, text="입력모드",
                                         command=self.send_cooling_control, state="disabled")
         self.cooling_send_btn.pack(fill=tk.X)
         
@@ -434,7 +444,7 @@ class MainGUI:
                     self.cooling_labels['cooling_additional_time'].config(state='readonly', bg='white')
                     
                     # 버튼 텍스트 변경
-                    self.cooling_send_btn.config(text="냉각 설정 입력 모드")
+                    self.cooling_send_btn.config(text="입력모드")
                     
                 else:
                     self.log_communication(f"  전송 실패: {message}", "red")
@@ -443,14 +453,178 @@ class MainGUI:
                 messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
             except Exception as e:
                 self.log_communication(f"냉각 제어 오류: {str(e)}", "red")
+
+    # ============================================
+    # 4. 제빙 제어 CMD 0xB2 전송 함수 (7바이트 버전)
+    # ============================================
+    def send_icemaking_control(self):
+        """제빙 제어 CMD 0xB2 전송 - 입력 모드 토글 방식 (7바이트)"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        if not self.icemaking_edit_mode:
+            # ========== 입력 모드 활성화 ==========
+            self.icemaking_edit_mode = True
+            
+            # 현재 값을 임시 저장소에 복사
+            self.icemaking_temp_data['operation'] = self.icemaking_data['operation']
+            self.icemaking_temp_data['icemaking_time'] = self.icemaking_data['icemaking_time']
+            self.icemaking_temp_data['water_capacity'] = self.icemaking_data['water_capacity']
+            self.icemaking_temp_data['swing_on_time'] = self.icemaking_data['swing_on_time']
+            self.icemaking_temp_data['swing_off_time'] = self.icemaking_data['swing_off_time']
+            
+            # Entry 위젯들을 편집 가능하게 설정
+            self.icemaking_labels['icemaking_time'].config(state='normal', bg='lightyellow')
+            self.icemaking_labels['water_capacity'].config(state='normal', bg='lightyellow')
+            self.icemaking_labels['swing_on_time'].config(state='normal', bg='lightyellow')
+            self.icemaking_labels['swing_off_time'].config(state='normal', bg='lightyellow')
+            
+            # 제빙 동작 라벨 UI 업데이트
+            if self.icemaking_temp_data['operation'] == '동작':
+                self.icemaking_labels['operation'].config(text="동작", bg="green")
+            else:
+                self.icemaking_labels['operation'].config(text="대기", bg="blue")
+            
+            # 버튼 텍스트 변경
+            self.icemaking_send_btn.config(text="설정 완료 (CMD 0xB2 전송)")
+            
+            self.log_communication("제빙 설정 입력 모드 활성화", "purple")
+        
+        else:
+            # ========== 입력 모드 비활성화 및 데이터 전송 ==========
+            try:
+                # 입력 값 가져오기
+                icemaking_time_str = self.icemaking_labels['icemaking_time'].get()
+                water_capacity_str = self.icemaking_labels['water_capacity'].get()
+                swing_on_str = self.icemaking_labels['swing_on_time'].get()
+                swing_off_str = self.icemaking_labels['swing_off_time'].get()
+                
+                # 빈 값 체크
+                if not icemaking_time_str or not water_capacity_str or not swing_on_str or not swing_off_str:
+                    messagebox.showwarning("경고", "모든 값을 입력해주세요.")
+                    return
+                
+                # 정수로 변환
+                icemaking_time = int(float(icemaking_time_str))  # ms 단위
+                water_capacity = int(float(water_capacity_str))  # Hz 단위
+                swing_on = int(float(swing_on_str))              # ms 단위
+                swing_off = int(float(swing_off_str))            # ms 단위
+                
+                # 범위 체크
+                if not (0 <= icemaking_time <= 65535):
+                    messagebox.showwarning("경고", "제빙시간은 0~65535ms 범위여야 합니다.")
+                    return
+                
+                if not (0 <= water_capacity <= 65535):
+                    messagebox.showwarning("경고", "입수 용량은 0~65535Hz 범위여야 합니다.")
+                    return
+                
+                if not (0 <= swing_on <= 255):
+                    messagebox.showwarning("경고", "스윙바 ON 시간은 0~255ms 범위여야 합니다.")
+                    return
+                
+                if not (0 <= swing_off <= 255):
+                    messagebox.showwarning("경고", "스윙바 OFF 시간은 0~255ms 범위여야 합니다.")
+                    return
+                
+                # DATA FIELD 구성 (7바이트)
+                data_field = bytearray(7)
+                
+                # DATA 1: 제빙 동작 (동작=1, 대기=0)
+                data_field[0] = 1 if self.icemaking_temp_data['operation'] == '동작' else 0
+                
+                # DATA 2-3: 제빙시간(ms) - 2바이트 (Big-endian: 상위, 하위)
+                data_field[1] = (icemaking_time >> 8) & 0xFF  # 상위 1바이트
+                data_field[2] = icemaking_time & 0xFF         # 하위 1바이트
+                
+                # DATA 4-5: 입수 용량(Hz) - 2바이트 (Big-endian: 상위, 하위)
+                data_field[3] = (water_capacity >> 8) & 0xFF  # 상위 1바이트
+                data_field[4] = water_capacity & 0xFF         # 하위 1바이트
+                
+                # DATA 6: 스윙바 ON 시간(ms) - 1바이트
+                data_field[5] = swing_on
+                
+                # DATA 7: 스윙바 OFF 시간(ms) - 1바이트
+                data_field[6] = swing_off
+                
+                # 로그 출력
+                hex_data = " ".join([f"{b:02X}" for b in data_field])
+                self.log_communication(f"[제빙 제어] CMD 0xB2 전송 (7바이트)", "blue")
+                self.log_communication(f"  제빙 동작: {self.icemaking_temp_data['operation']} (0x{data_field[0]:02X})", "gray")
+                self.log_communication(f"  제빙시간: {icemaking_time}ms (상위:0x{data_field[1]:02X}, 하위:0x{data_field[2]:02X})", "gray")
+                self.log_communication(f"  입수 용량: {water_capacity}Hz (상위:0x{data_field[3]:02X}, 하위:0x{data_field[4]:02X})", "gray")
+                self.log_communication(f"  스윙바 ON: {swing_on}ms (0x{data_field[5]:02X})", "gray")
+                self.log_communication(f"  스윙바 OFF: {swing_off}ms (0x{data_field[6]:02X})", "gray")
+                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
+                
+                # CMD 0xB2 패킷 전송
+                success, message = self.comm.send_packet(0xB2, bytes(data_field))
+                
+                if success:
+                    self.log_communication(f"  전송 성공 (CMD 0xB2, 7바이트)", "green")
+                    
+                    # 입력 모드 비활성화
+                    self.icemaking_edit_mode = False
+                    
+                    # Entry 위젯들을 읽기 전용으로 설정
+                    self.icemaking_labels['icemaking_time'].config(state='readonly', bg='white')
+                    self.icemaking_labels['water_capacity'].config(state='readonly', bg='white')
+                    self.icemaking_labels['swing_on_time'].config(state='readonly', bg='white')
+                    self.icemaking_labels['swing_off_time'].config(state='readonly', bg='white')
+                    
+                    # 버튼 텍스트 변경
+                    self.icemaking_send_btn.config(text="제빙 설정 입력 모드")
+                    
+                else:
+                    self.log_communication(f"  전송 실패: {message}", "red")
+                    
+            except ValueError:
+                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+            except Exception as e:
+                # self.log_communication(f"제빙 제어 오류: {str(e)}", "red")_communication(f"  스윙바 OFF: {swing_off}ms", "gray")
+                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
+                
+                # CMD 0xB2 패킷 전송
+                success, message = self.comm.send_packet(0xB2, bytes(data_field))
+                
+                if success:
+                    self.log_communication(f"  전송 성공 (CMD 0xB2, 5바이트)", "green")
+                    
+                    # 입력 모드 비활성화
+                    self.icemaking_edit_mode = False
+                    
+                    # Entry 위젯들을 읽기 전용으로 설정
+                    self.icemaking_labels['icemaking_time'].config(state='readonly', bg='white')
+                    self.icemaking_labels['water_capacity'].config(state='readonly', bg='white')
+                    self.icemaking_labels['swing_on_time'].config(state='readonly', bg='white')
+                    self.icemaking_labels['swing_off_time'].config(state='readonly', bg='white')
+                    
+                    # 버튼 텍스트 변경
+                    self.icemaking_send_btn.config(text="제빙 설정 입력 모드")
+                    
+                else:
+                    self.log_communication(f"  전송 실패: {message}", "red")
+                    
+            except ValueError:
+                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+            except Exception as e:
+                self.log_communication(f"제빙 제어 오류: {str(e)}", "red")
     
     def toggle_refrigerant_valve_target(self, event):
         """냉매전환밸브 목표 토글 (냉각->제빙->핫가스->냉각)"""
-        if not self.hvac_edit_mode:
+
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
             return
         
         valve_sequence = ['냉각', '제빙', '핫가스']
-        current_value = self.hvac_temp_data['refrigerant_valve_target']
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['refrigerant_valve_target']
+        else:
+            current_value = self.hvac_data['refrigerant_valve_target']
         
         try:
             current_index = valve_sequence.index(current_value)
@@ -459,14 +633,203 @@ class MainGUI:
         except ValueError:
             next_value = '냉각'
         
-        self.hvac_temp_data['refrigerant_valve_target'] = next_value
-        
         # UI 업데이트
         colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
         self.hvac_labels['refrigerant_valve_target'].config(
             text=next_value, 
             bg=colors.get(next_value, 'orange')
         )
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['refrigerant_valve_target'] = next_value
+            self.log_communication(f"냉매전환밸브 목표 변경: {next_value} (입력 모드)", "purple")
+            print(f"DEBUG: 임시 저장소에 저장됨")  # 디버그
+        else:
+            pass
+
+    def toggle_compressor_state(self, event):
+        """압축기 상태 토글 (동작중<->미동작)"""
+        print(f"DEBUG: toggle_compressor_state 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
+        
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['compressor_state']
+        else:
+            current_value = self.hvac_data['compressor_state']
+        
+        next_value = '미동작' if current_value == '동작중' else '동작중'
+        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
+        
+        # UI 업데이트
+        if next_value == '동작중':
+            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
+        else:
+            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['compressor_state'] = next_value
+            self.log_communication(f"압축기 상태 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['compressor_state'] = next_value
+            self.send_hvac_immediate()
+
+    def toggle_dc_fan1(self, event):
+        """압축기 팬 토글 (ON<->OFF)"""
+        print(f"DEBUG: toggle_dc_fan1 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
+        
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['dc_fan1']
+        else:
+            current_value = self.hvac_data['dc_fan1']
+        
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['dc_fan1'] = next_value
+            self.log_communication(f"압축기 팬 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['dc_fan1'] = next_value
+            self.send_hvac_immediate()
+
+    def toggle_dc_fan2(self, event):
+        """얼음탱크 팬 토글 (ON<->OFF)"""
+        print(f"DEBUG: toggle_dc_fan2 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
+        
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['dc_fan2']
+        else:
+            current_value = self.hvac_data['dc_fan2']
+        
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['dc_fan2'] = next_value
+            self.log_communication(f"얼음탱크 팬 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['dc_fan2'] = next_value
+            self.send_hvac_immediate()
+
+    def toggle_compressor_state(self, event):
+        """압축기 상태 토글 (동작중<->미동작)"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['compressor_state']
+        else:
+            current_value = self.hvac_data['compressor_state']
+        
+        next_value = '미동작' if current_value == '동작중' else '동작중'
+        
+        # UI 업데이트
+        if next_value == '동작중':
+            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
+        else:
+            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['compressor_state'] = next_value
+            self.log_communication(f"압축기 상태 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['compressor_state'] = next_value
+            self.send_hvac_immediate()
+
+    def toggle_dc_fan1(self, event):
+        """압축기 팬 토글 (ON<->OFF)"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['dc_fan1']
+        else:
+            current_value = self.hvac_data['dc_fan1']
+        
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['dc_fan1'] = next_value
+            self.log_communication(f"압축기 팬 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['dc_fan1'] = next_value
+            self.send_hvac_immediate()
+
+    def toggle_dc_fan2(self, event):
+        """얼음탱크 팬 토글 (ON<->OFF)"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        # 입력 모드 여부에 따라 다른 데이터 사용
+        if self.hvac_edit_mode:
+            current_value = self.hvac_temp_data['dc_fan2']
+        else:
+            current_value = self.hvac_data['dc_fan2']
+        
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
+        
+        if self.hvac_edit_mode:
+            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
+            self.hvac_temp_data['dc_fan2'] = next_value
+            self.log_communication(f"얼음탱크 팬 변경: {next_value} (입력 모드)", "purple")
+        else:
+            # 일반 모드: 즉시 데이터 업데이트 및 전송
+            self.hvac_data['dc_fan2'] = next_value
+            self.send_hvac_immediate()
 
     def toggle_compressor_state(self, event):
         """압축기 상태 토글 (동작중<->미동작)"""
@@ -513,6 +876,24 @@ class MainGUI:
         else:
             self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
 
+    # ============================================
+    # 3. 제빙 동작 토글 함수 추가
+    # ============================================
+    def toggle_icemaking_operation(self, event):
+        """제빙 동작 토글 (대기<->동작)"""
+        if not self.icemaking_edit_mode:
+            return
+        
+        current_value = self.icemaking_temp_data['operation']
+        next_value = '동작' if current_value == '대기' else '대기'
+        self.icemaking_temp_data['operation'] = next_value
+        
+        # UI 업데이트
+        if next_value == '동작':
+            self.icemaking_labels['operation'].config(text="동작", bg="green")
+        else:
+            self.icemaking_labels['operation'].config(text="대기", bg="blue")
+
     def send_hvac_control(self):
         """공조 제어 CMD 0xB0 전송 - 입력 모드 토글 방식"""
         if not self.comm.is_connected:
@@ -530,7 +911,7 @@ class MainGUI:
             self.hvac_temp_data['dc_fan1'] = self.hvac_data['dc_fan1']
             self.hvac_temp_data['dc_fan2'] = self.hvac_data['dc_fan2']
             
-            # UI 업데이트 (임시 저장소 값으로)
+            # UI를 임시 저장소 값으로 초기화
             colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
             self.hvac_labels['refrigerant_valve_target'].config(
                 text=self.hvac_temp_data['refrigerant_valve_target'],
@@ -542,9 +923,6 @@ class MainGUI:
             else:
                 self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
             
-            # 목표 RPS Entry 활성화
-            self.hvac_labels['target_rps'].config(state='normal', bg='lightyellow')
-            
             if self.hvac_temp_data['dc_fan1'] == 'ON':
                 self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
             else:
@@ -555,10 +933,13 @@ class MainGUI:
             else:
                 self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
             
+            # 목표 RPS Entry 활성화 (노란색 배경)
+            self.hvac_labels['target_rps'].config(state='normal', bg='lightyellow')
+            
             # 버튼 텍스트 변경
             self.hvac_send_btn.config(text="설정 완료 (CMD 0xB0 전송)")
             
-            self.log_communication("공조 설정 입력 모드 활성화", "purple")
+            self.log_communication("공조 설정 입력 모드 활성화 (모든 설정 변경 가능)", "purple")
         
         else:
             # ========== 입력 모드 비활성화 및 데이터 전송 ==========
@@ -577,33 +958,40 @@ class MainGUI:
                     messagebox.showwarning("경고", "목표 RPS는 0~255 범위여야 합니다.")
                     return
                 
+                # 임시 저장소의 모든 값을 실제 데이터로 복사
+                self.hvac_data['refrigerant_valve_target'] = self.hvac_temp_data['refrigerant_valve_target']
+                self.hvac_data['compressor_state'] = self.hvac_temp_data['compressor_state']
+                self.hvac_data['target_rps'] = target_rps
+                self.hvac_data['dc_fan1'] = self.hvac_temp_data['dc_fan1']
+                self.hvac_data['dc_fan2'] = self.hvac_temp_data['dc_fan2']
+                
                 # DATA FIELD 구성 (5바이트)
                 data_field = bytearray(5)
                 
                 # DATA 1: 냉매전환밸브 목표 (냉각=0, 제빙=1, 핫가스=2)
                 valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2}
-                data_field[0] = valve_map[self.hvac_temp_data['refrigerant_valve_target']]
+                data_field[0] = valve_map[self.hvac_data['refrigerant_valve_target']]
                 
                 # DATA 2: 압축기 상태 (동작=1, 미동작=0)
-                data_field[1] = 1 if self.hvac_temp_data['compressor_state'] == '동작중' else 0
+                data_field[1] = 1 if self.hvac_data['compressor_state'] == '동작중' else 0
                 
                 # DATA 3: 목표 RPS
                 data_field[2] = target_rps
                 
                 # DATA 4: DC FAN 1 (압축기 팬, ON=1, OFF=0)
-                data_field[3] = 1 if self.hvac_temp_data['dc_fan1'] == 'ON' else 0
+                data_field[3] = 1 if self.hvac_data['dc_fan1'] == 'ON' else 0
                 
                 # DATA 5: DC FAN 2 (얼음탱크 팬, ON=1, OFF=0)
-                data_field[4] = 1 if self.hvac_temp_data['dc_fan2'] == 'ON' else 0
+                data_field[4] = 1 if self.hvac_data['dc_fan2'] == 'ON' else 0
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[공조 제어] CMD 0xB0 전송", "blue")
-                self.log_communication(f"  냉매전환밸브 목표: {self.hvac_temp_data['refrigerant_valve_target']} ({data_field[0]})", "gray")
-                self.log_communication(f"  압축기 상태: {self.hvac_temp_data['compressor_state']} ({data_field[1]})", "gray")
+                self.log_communication(f"[공조 제어] CMD 0xB0 전송 (입력 모드 최종 설정)", "blue")
+                self.log_communication(f"  냉매전환밸브 목표: {self.hvac_data['refrigerant_valve_target']} ({data_field[0]})", "gray")
+                self.log_communication(f"  압축기 상태: {self.hvac_data['compressor_state']} ({data_field[1]})", "gray")
                 self.log_communication(f"  목표 RPS: {target_rps}", "gray")
-                self.log_communication(f"  압축기 팬: {self.hvac_temp_data['dc_fan1']} ({data_field[3]})", "gray")
-                self.log_communication(f"  얼음탱크 팬: {self.hvac_temp_data['dc_fan2']} ({data_field[4]})", "gray")
+                self.log_communication(f"  압축기 팬: {self.hvac_data['dc_fan1']} ({data_field[3]})", "gray")
+                self.log_communication(f"  얼음탱크 팬: {self.hvac_data['dc_fan2']} ({data_field[4]})", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
                 # CMD 0xB0 패킷 전송
@@ -619,7 +1007,7 @@ class MainGUI:
                     self.hvac_labels['target_rps'].config(state='readonly', bg='white')
                     
                     # 버튼 텍스트 변경
-                    self.hvac_send_btn.config(text="공조 설정 입력 모드")
+                    self.hvac_send_btn.config(text="입력모드")
                     
                 else:
                     self.log_communication(f"  전송 실패: {message}", "red")
@@ -647,7 +1035,7 @@ class MainGUI:
                                                             width=8, relief="raised")
         self.hvac_labels['refrigerant_valve_state'].pack(side=tk.RIGHT)
         
-        # 목표 (버튼으로 변경)
+        # 목표 (버튼으로 변경 - 클릭 가능하게 설정)
         target_frame = ttk.Frame(valve_subframe)
         target_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(target_frame, text="목표:", font=("Arial", 8)).pack(side=tk.LEFT)
@@ -655,13 +1043,14 @@ class MainGUI:
                                                             fg="white", bg="orange", font=("Arial", 8, "bold"),
                                                             width=8, relief="raised", cursor="hand2")
         self.hvac_labels['refrigerant_valve_target'].pack(side=tk.RIGHT)
+        # 클릭 이벤트 바인딩 확인
         self.hvac_labels['refrigerant_valve_target'].bind("<Button-1>", self.toggle_refrigerant_valve_target)
         
         # 압축기 서브프레임
         comp_subframe = ttk.LabelFrame(hvac_frame, text="압축기", padding="3")
         comp_subframe.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         
-        # 상태 (버튼으로 변경)
+        # 상태 (버튼으로 변경 - 클릭 가능하게 설정)
         comp_state_frame = ttk.Frame(comp_subframe)
         comp_state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(comp_state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
@@ -669,6 +1058,7 @@ class MainGUI:
                                                     fg="white", bg="gray", font=("Arial", 8, "bold"),
                                                     width=8, relief="raised", cursor="hand2")
         self.hvac_labels['compressor_state'].pack(side=tk.RIGHT)
+        # 클릭 이벤트 바인딩 확인
         self.hvac_labels['compressor_state'].bind("<Button-1>", self.toggle_compressor_state)
         
         # 현재 RPS
@@ -698,7 +1088,7 @@ class MainGUI:
                                                 font=("Arial", 8), bg="white", relief="sunken")
         self.hvac_labels['error_code'].pack(side=tk.RIGHT)
         
-        # DC FAN 1 (압축기 팬, 버튼으로 변경)
+        # DC FAN 1 (압축기 팬, 버튼으로 변경 - 클릭 가능하게 설정)
         fan1_frame = ttk.Frame(comp_subframe)
         fan1_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(fan1_frame, text="압축기 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
@@ -706,9 +1096,10 @@ class MainGUI:
                                             fg="white", bg="gray", font=("Arial", 8, "bold"),
                                             width=5, relief="raised", cursor="hand2")
         self.hvac_labels['dc_fan1'].pack(side=tk.RIGHT)
+        # 클릭 이벤트 바인딩 확인
         self.hvac_labels['dc_fan1'].bind("<Button-1>", self.toggle_dc_fan1)
         
-        # DC FAN 2 (얼음탱크 팬, 버튼으로 변경)
+        # DC FAN 2 (얼음탱크 팬, 버튼으로 변경 - 클릭 가능하게 설정)
         fan2_frame = ttk.Frame(comp_subframe)
         fan2_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(fan2_frame, text="얼음탱크 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
@@ -716,12 +1107,13 @@ class MainGUI:
                                             fg="white", bg="gray", font=("Arial", 8, "bold"),
                                             width=5, relief="raised", cursor="hand2")
         self.hvac_labels['dc_fan2'].pack(side=tk.RIGHT)
+        # 클릭 이벤트 바인딩 확인
         self.hvac_labels['dc_fan2'].bind("<Button-1>", self.toggle_dc_fan2)
         
         # CMD 0xB0 전송 버튼
         send_btn_frame = ttk.Frame(hvac_frame)
         send_btn_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 1))
-        self.hvac_send_btn = ttk.Button(send_btn_frame, text="공조 설정 입력 모드",
+        self.hvac_send_btn = ttk.Button(send_btn_frame, text="입력모드",
                                         command=self.send_hvac_control, state="disabled")
         self.hvac_send_btn.pack(fill=tk.X)
         
@@ -729,55 +1121,76 @@ class MainGUI:
         comp_subframe.columnconfigure(0, weight=1)
         hvac_frame.columnconfigure(0, weight=1)
     
+    # ============================================
+    # 2. create_icemaking_area 메서드 전체 교체
+    # ============================================
     def create_icemaking_area(self, parent):
         """제빙 섹션 생성"""
         icemaking_frame = ttk.LabelFrame(parent, text="제빙", padding="2")
         icemaking_frame.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=1)
         
-        # 제빙 동작
+        # 제빙 동작 (토글 버튼으로 변경)
         operation_frame = ttk.Frame(icemaking_frame)
         operation_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(operation_frame, text="제빙 동작:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.icemaking_labels['operation'] = tk.Label(operation_frame, text="대기", 
-                                                     fg="white", bg="blue", font=("Arial", 8, "bold"),
-                                                     width=10, relief="raised")
+                                                    fg="white", bg="blue", font=("Arial", 8, "bold"),
+                                                    width=10, relief="raised", cursor="hand2")
         self.icemaking_labels['operation'].pack(side=tk.LEFT, padx=(2, 0))
+        self.icemaking_labels['operation'].bind("<Button-1>", self.toggle_icemaking_operation)
         
-        # 제빙시간
+        # 제빙시간 (ms 단위, 입력 가능)
         time_frame = ttk.Frame(icemaking_frame)
         time_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(time_frame, text="제빙시간:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['icemaking_time'] = tk.Label(time_frame, text="0", 
-                                                          font=("Arial", 9), bg="white", relief="sunken", width=8)
-        self.icemaking_labels['icemaking_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(time_frame, text="초", font=("Arial", 9)).pack(side=tk.LEFT)
         
-        # 입수 용량
+        vcmd_num = (self.root.register(self.validate_number), '%P')
+        self.icemaking_labels['icemaking_time'] = tk.Entry(time_frame, font=("Arial", 9), 
+                                                width=8, validate='key', validatecommand=vcmd_num,
+                                                state='readonly')
+        self.icemaking_labels['icemaking_time'].insert(0, "0")
+        self.icemaking_labels['icemaking_time'].pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(time_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        
+        # 입수 용량 (Hz 단위, 입력 가능)
         capacity_frame = ttk.Frame(icemaking_frame)
         capacity_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(capacity_frame, text="입수 용량:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['water_capacity'] = tk.Label(capacity_frame, text="0", 
-                                                           font=("Arial", 9), bg="white", relief="sunken", width=8)
+        self.icemaking_labels['water_capacity'] = tk.Entry(capacity_frame, font=("Arial", 9), 
+                                                    width=8, validate='key', validatecommand=vcmd_num,
+                                                    state='readonly')
+        self.icemaking_labels['water_capacity'].insert(0, "0")
         self.icemaking_labels['water_capacity'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(capacity_frame, text="Hz", font=("Arial", 9)).pack(side=tk.LEFT)
         
-        # 스윙바 ON 시간
+        # 스윙바 ON 시간 (ms 단위, 입력 가능)
         swing_on_frame = ttk.Frame(icemaking_frame)
         swing_on_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(swing_on_frame, text="스윙바 ON:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['swing_on_time'] = tk.Label(swing_on_frame, text="0", 
-                                                         font=("Arial", 9), bg="white", relief="sunken", width=8)
+        self.icemaking_labels['swing_on_time'] = tk.Entry(swing_on_frame, font=("Arial", 9), 
+                                                    width=8, validate='key', validatecommand=vcmd_num,
+                                                    state='readonly')
+        self.icemaking_labels['swing_on_time'].insert(0, "0")
         self.icemaking_labels['swing_on_time'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(swing_on_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
         
-        # 스윙바 OFF 시간
+        # 스윙바 OFF 시간 (ms 단위, 입력 가능)
         swing_off_frame = ttk.Frame(icemaking_frame)
         swing_off_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(swing_off_frame, text="스윙바 OFF:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['swing_off_time'] = tk.Label(swing_off_frame, text="0", 
-                                                          font=("Arial", 9), bg="white", relief="sunken", width=8)
+        self.icemaking_labels['swing_off_time'] = tk.Entry(swing_off_frame, font=("Arial", 9), 
+                                                    width=8, validate='key', validatecommand=vcmd_num,
+                                                    state='readonly')
+        self.icemaking_labels['swing_off_time'].insert(0, "0")
         self.icemaking_labels['swing_off_time'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(swing_off_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        
+        # CMD 0xB2 전송 버튼
+        send_btn_frame = ttk.Frame(icemaking_frame)
+        send_btn_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        self.icemaking_send_btn = ttk.Button(send_btn_frame, text="제빙 설정 입력 모드",
+                                        command=self.send_icemaking_control, state="disabled")
+        self.icemaking_send_btn.pack(fill=tk.X)
         
         icemaking_frame.columnconfigure(0, weight=1)
     
@@ -1169,6 +1582,9 @@ class MainGUI:
             self.port_combo.set(ports[0])
         self.log_communication(f"포트 새로고침: {len(ports)}개 포트 발견", "blue")
     
+    # ============================================
+    # 5. toggle_connection 메서드에 제빙 버튼 활성화 추가
+    # ============================================
     def toggle_connection(self):
         """연결/연결해제 토글"""
         if not self.comm.is_connected:
@@ -1198,6 +1614,10 @@ class MainGUI:
                 # 공조 제어 버튼 활성화
                 if hasattr(self, 'hvac_send_btn'):
                     self.hvac_send_btn.config(state="normal")
+
+                # 제빙 제어 버튼 활성화 추가
+                if hasattr(self, 'icemaking_send_btn'):
+                    self.icemaking_send_btn.config(state="normal")
                 
                 self.log_communication(f"포트 {port} 연결됨", "green")
             else:
@@ -1223,6 +1643,10 @@ class MainGUI:
                 # 공조 제어 버튼 비활성화
                 if hasattr(self, 'hvac_send_btn'):
                     self.hvac_send_btn.config(state="disabled")
+
+                # 제빙 제어 버튼 비활성화 추가
+                if hasattr(self, 'icemaking_send_btn'):
+                    self.icemaking_send_btn.config(state="disabled")
                 
                 self.log_communication("연결 해제됨", "orange")
     
@@ -1351,6 +1775,9 @@ class MainGUI:
             
             time.sleep(0.1)
     
+    # ============================================
+    # 7. process_received_packet에 CMD 0xB2 수신 처리 추가
+    # ============================================
     def process_received_packet(self, packet_info):
         """수신된 프로토콜 패킷 처리"""
         try:
@@ -1371,21 +1798,27 @@ class MainGUI:
             
             # CMD별 데이터 처리
             if cmd in [0xA0, 0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]:
+                # CMD 0xB2 수신 처리 (제빙 제어 응답)
+                if cmd == 0xB2 and len(data_field) >= 7:
+                    operation = data_field[0]  # 0=대기, 1=동작
+                    icemaking_time = (data_field[1] << 8) | data_field[2]  # 2바이트 (ms)
+                    water_capacity = (data_field[3] << 8) | data_field[4]  # 2바이트 (Hz)
+                    swing_on = data_field[5]   # 1바이트 (ms)
+                    swing_off = data_field[6]  # 1바이트 (ms)
+                    
+                    self.icemaking_data['operation'] = '동작' if operation == 1 else '대기'
+                    self.icemaking_data['icemaking_time'] = icemaking_time
+                    self.icemaking_data['water_capacity'] = water_capacity
+                    self.icemaking_data['swing_on_time'] = swing_on
+                    self.icemaking_data['swing_off_time'] = swing_off
+                    
+                    self.log_communication(f"  제빙 데이터 수신: 동작={self.icemaking_data['operation']}, "
+                                        f"시간={icemaking_time}ms, 용량={water_capacity}Hz, "
+                                        f"스윙 ON={swing_on}ms, OFF={swing_off}ms", "gray")
+                
                 try:
                     data_string = data_field.decode('utf-8', errors='ignore')
                     self.parse_and_update_data(data_string)
-
-                    # CMD 0xB2 수신 처리 예시 (data_field에서 읽는 경우)
-                    if cmd == 0xB2 and len(data_field) >= 5:
-                        on_temp_int = data_field[0]
-                        on_temp_dec = data_field[1]
-                        off_temp_int = data_field[2]
-                        off_temp_dec = data_field[3]
-                        add_time = data_field[4]
-                        
-                        self.cooling_data['on_temp'] = on_temp_int + (on_temp_dec / 10.0)
-                        self.cooling_data['off_temp'] = off_temp_int + (off_temp_dec / 10.0)
-                        self.cooling_data['cooling_additional_time'] = add_time
                 except:
                     pass
         
@@ -1599,26 +2032,26 @@ class MainGUI:
                 label = self.sensor_labels[sensor_key]
                 label.config(text=f"{value:.1f}")
         
-        # 공조시스템 상태 업데이트
-        for hvac_key, value in self.hvac_data.items():
-            if hvac_key in self.hvac_labels:
-                label = self.hvac_labels[hvac_key]
-                if hvac_key in ['refrigerant_valve_state', 'refrigerant_valve_target']:
-                    colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
-                    color = colors.get(value, 'gray')
-                    label.config(text=value, bg=color)
-                elif hvac_key == 'compressor_state':
-                    if value == '동작중':
-                        label.config(text="동작중", bg="green")
-                    else:
-                        label.config(text="미동작", bg="gray")
-                elif hvac_key in ['dc_fan1', 'dc_fan2']:
-                    if value == 'ON':
-                        label.config(text="ON", bg="green")
-                    else:
-                        label.config(text="OFF", bg="gray")
-                else:
-                    label.config(text=str(value))
+        # # 공조시스템 상태 업데이트
+        # for hvac_key, value in self.hvac_data.items():
+        #     if hvac_key in self.hvac_labels:
+        #         label = self.hvac_labels[hvac_key]
+        #         if hvac_key in ['refrigerant_valve_state', 'refrigerant_valve_target']:
+        #             colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
+        #             color = colors.get(value, 'gray')
+        #             label.config(text=value, bg=color)
+        #         elif hvac_key == 'compressor_state':
+        #             if value == '동작중':
+        #                 label.config(text="동작중", bg="green")
+        #             else:
+        #                 label.config(text="미동작", bg="gray")
+        #         elif hvac_key in ['dc_fan1', 'dc_fan2']:
+        #             if value == 'ON':
+        #                 label.config(text="ON", bg="green")
+        #             else:
+        #                 label.config(text="OFF", bg="gray")
+        #         else:
+        #             label.config(text=str(value))
         
         # 냉각 시스템 상태 업데이트
         for cooling_key, value in self.cooling_data.items():
@@ -1663,6 +2096,7 @@ class MainGUI:
                             label.config(text="동작중", bg="green")
                         else:
                             label.config(text="미동작", bg="gray")
+
                 elif hvac_key == 'target_rps':
                     # 입력 모드가 아닐 때만 업데이트
                     if not self.hvac_edit_mode:
@@ -1687,11 +2121,28 @@ class MainGUI:
                     # 에러코드는 항상 업데이트
                     label.config(text=str(value))
         
-        # 제빙 시스템 상태 업데이트
-        for ice_key, value in self.icemaking_data.items():
-            if ice_key in self.icemaking_labels:
-                label = self.icemaking_labels[ice_key]
-                label.config(text=str(value))
+        # 제빙 시스템 상태 업데이트 (입력 모드가 아닐 때만)
+        if not self.icemaking_edit_mode:
+            for ice_key, value in self.icemaking_data.items():
+                if ice_key in self.icemaking_labels:
+                    widget = self.icemaking_labels[ice_key]
+                    
+                    if ice_key == 'operation':
+                        # Label 위젯
+                        if value == '동작':
+                            widget.config(text="동작", bg="green")
+                        else:
+                            widget.config(text="대기", bg="blue")
+                    
+                    elif ice_key in ['icemaking_time', 'water_capacity', 'swing_on_time', 'swing_off_time']:
+                        # Entry 위젯 업데이트 (readonly 상태에서만)
+                        current_value = widget.get()
+                        new_value = str(value)
+                        if current_value != new_value:
+                            widget.config(state='normal')
+                            widget.delete(0, tk.END)
+                            widget.insert(0, new_value)
+                            widget.config(state='readonly')
         
         # 드레인 탱크 상태 업데이트
         for tank_key, value in self.drain_tank_data.items():
@@ -1716,6 +2167,8 @@ class MainGUI:
                 else:
                     label.config(text="OFF", bg="gray")
         
+        
+
         # 그래프 업데이트
         self.update_graphs()
         
