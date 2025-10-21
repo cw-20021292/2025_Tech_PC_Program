@@ -54,6 +54,16 @@ class MainGUI:
             'dc_fan1': 'OFF',
             'dc_fan2': 'OFF'
         }
+
+        # 공조시스템 입력 모드 상태
+        self.hvac_edit_mode = False  # 입력 모드 활성화 여부
+        self.hvac_temp_data = {
+            'refrigerant_valve_target': '핫가스',  # 냉각/제빙/핫가스
+            'compressor_state': '미동작',  # 동작/미동작
+            'target_rps': 0,
+            'dc_fan1': 'OFF',  # ON/OFF
+            'dc_fan2': 'OFF'   # ON/OFF
+        }
         
         # 냉각시스템
         self.cooling_data = {
@@ -62,6 +72,9 @@ class MainGUI:
             'off_temp': 0,
             'cooling_additional_time': 0
         }
+
+        # 냉각 입력 모드 상태 추가
+        self.cooling_edit_mode = False  # 입력 모드 활성화 여부
         
         # 냉각 입력 필드가 포커스 중인지 추적
         self.cooling_input_focus = {
@@ -275,8 +288,8 @@ class MainGUI:
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(state_frame, text="운전 상태:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         self.cooling_labels['operation_state'] = tk.Label(state_frame, text="STOP", 
-                                                         fg="white", bg="red", font=("Arial", 7, "bold"),
-                                                         width=8, relief="raised")
+                                                        fg="white", bg="red", font=("Arial", 7, "bold"),
+                                                        width=8, relief="raised")
         self.cooling_labels['operation_state'].pack(side=tk.LEFT, padx=(2, 0))
         
         # ON 온도 (입력 가능)
@@ -284,118 +297,337 @@ class MainGUI:
         on_temp_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(on_temp_frame, text="ON 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         
-        # 숫자만 입력 가능한 Entry
         vcmd_temp = (self.root.register(self.validate_number), '%P')
         self.cooling_labels['on_temp'] = tk.Entry(on_temp_frame, font=("Arial", 8), 
-                                                  width=6, validate='key', validatecommand=vcmd_temp)
+                                                width=6, validate='key', validatecommand=vcmd_temp,
+                                                state='readonly')  # 기본 읽기 전용
         self.cooling_labels['on_temp'].insert(0, "0")
         self.cooling_labels['on_temp'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(on_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
-        
-        # 포커스 이벤트 바인딩
-        self.cooling_labels['on_temp'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('on_temp', True))
-        self.cooling_labels['on_temp'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('on_temp', False))
         
         # OFF 온도 (입력 가능)
         off_temp_frame = ttk.Frame(cooling_frame)
         off_temp_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(off_temp_frame, text="OFF 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         self.cooling_labels['off_temp'] = tk.Entry(off_temp_frame, font=("Arial", 8), 
-                                                   width=6, validate='key', validatecommand=vcmd_temp)
+                                                width=6, validate='key', validatecommand=vcmd_temp,
+                                                state='readonly')  # 기본 읽기 전용
         self.cooling_labels['off_temp'].insert(0, "0")
         self.cooling_labels['off_temp'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(off_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
-        
-        self.cooling_labels['off_temp'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('off_temp', True))
-        self.cooling_labels['off_temp'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('off_temp', False))
         
         # 냉각 추가시간 (입력 가능)
         add_time_frame = ttk.Frame(cooling_frame)
         add_time_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(add_time_frame, text="추가시간:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         self.cooling_labels['cooling_additional_time'] = tk.Entry(add_time_frame, font=("Arial", 8), 
-                                                                  width=6, validate='key', validatecommand=vcmd_temp)
+                                                                width=6, validate='key', validatecommand=vcmd_temp,
+                                                                state='readonly')  # 기본 읽기 전용
         self.cooling_labels['cooling_additional_time'].insert(0, "0")
         self.cooling_labels['cooling_additional_time'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(add_time_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT)
         
-        self.cooling_labels['cooling_additional_time'].bind('<FocusIn>', lambda e: self.on_cooling_input_focus('cooling_additional_time', True))
-        self.cooling_labels['cooling_additional_time'].bind('<FocusOut>', lambda e: self.on_cooling_input_focus('cooling_additional_time', False))
-        
         # CMD 0xB1 전송 버튼
         send_btn_frame = ttk.Frame(cooling_frame)
         send_btn_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
-        self.cooling_send_btn = ttk.Button(send_btn_frame, text="CMD 0xB1 전송",
-                                          command=self.send_cooling_control, state="disabled")
+        self.cooling_send_btn = ttk.Button(send_btn_frame, text="냉각 설정 입력 모드",
+                                        command=self.send_cooling_control, state="disabled")
         self.cooling_send_btn.pack(fill=tk.X)
         
         cooling_frame.columnconfigure(0, weight=1)
     
     def validate_number(self, value):
-        """숫자만 입력 가능하도록 검증"""
+        """숫자와 소숫점 입력 가능하도록 검증"""
         if value == "":
             return True
         try:
-            int(value)
+            # 소숫점이 2개 이상이면 안됨
+            if value.count('.') > 1:
+                return False
+            float(value)
             return True
         except ValueError:
             return False
     
-    def on_cooling_input_focus(self, field_name, has_focus):
-        """냉각 입력 필드 포커스 상태 추적"""
-        self.cooling_input_focus[field_name] = has_focus
-    
     def send_cooling_control(self):
-        """냉각 제어 CMD 0xB1 전송"""
+        """냉각 제어 CMD 0xB1 전송 - 입력 모드 토글 방식"""
         if not self.comm.is_connected:
             messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
             return
         
-        try:
-            # 입력 값 가져오기
-            on_temp_str = self.cooling_labels['on_temp'].get()
-            off_temp_str = self.cooling_labels['off_temp'].get()
-            add_time_str = self.cooling_labels['cooling_additional_time'].get()
+        if not self.cooling_edit_mode:
+            # ========== 입력 모드 활성화 ==========
+            self.cooling_edit_mode = True
             
-            # 빈 값 체크
-            if not on_temp_str or not off_temp_str or not add_time_str:
-                messagebox.showwarning("경고", "모든 값을 입력해주세요.")
-                return
+            # Entry 위젯들을 편집 가능하게 설정
+            self.cooling_labels['on_temp'].config(state='normal', bg='lightyellow')
+            self.cooling_labels['off_temp'].config(state='normal', bg='lightyellow')
+            self.cooling_labels['cooling_additional_time'].config(state='normal', bg='lightyellow')
             
-            # 정수 변환
-            on_temp = int(on_temp_str)
-            off_temp = int(off_temp_str)
-            add_time = int(add_time_str)
+            # 버튼 텍스트 변경
+            self.cooling_send_btn.config(text="설정 완료 (CMD 0xB1 전송)")
             
-            # 범위 체크 (0~255)
-            if not (0 <= on_temp <= 255 and 0 <= off_temp <= 255 and 0 <= add_time <= 255):
-                messagebox.showwarning("경고", "값은 0~255 범위여야 합니다.")
-                return
-            
-            # DATA FIELD 구성 (3바이트)
-            data_field = bytearray(3)
-            data_field[0] = on_temp      # DATA 1: ON 온도
-            data_field[1] = off_temp     # DATA 2: OFF 온도
-            data_field[2] = add_time     # DATA 3: 추가시간
-            
-            # 로그 출력
-            hex_data = " ".join([f"{b:02X}" for b in data_field])
-            self.log_communication(f"[냉각 제어] CMD 0xB1 전송", "blue")
-            self.log_communication(f"  ON온도: {on_temp}℃, OFF온도: {off_temp}℃, 추가시간: {add_time}초", "gray")
-            self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
-            
-            # CMD 0xB1 패킷 전송
-            success, message = self.comm.send_packet(0xB1, bytes(data_field))
-            
-            if success:
-                self.log_communication(f"  전송 성공 (CMD 0xB1, 3바이트)", "green")
-            else:
-                self.log_communication(f"  전송 실패: {message}", "red")
+            self.log_communication("냉각 설정 입력 모드 활성화", "purple")
+        
+        else:
+            # ========== 입력 모드 비활성화 및 데이터 전송 ==========
+            try:
+                # 입력 값 가져오기
+                on_temp_str = self.cooling_labels['on_temp'].get()
+                off_temp_str = self.cooling_labels['off_temp'].get()
+                add_time_str = self.cooling_labels['cooling_additional_time'].get()
                 
+                # 빈 값 체크
+                if not on_temp_str or not off_temp_str or not add_time_str:
+                    messagebox.showwarning("경고", "모든 값을 입력해주세요.")
+                    return
+                
+                # 실수로 변환
+                on_temp_float = float(on_temp_str)
+                off_temp_float = float(off_temp_str)
+                add_time = int(add_time_str)
+                
+                # 범위 체크 (온도: 0~50°C, 추가시간: 0~255초)
+                if not (0 <= on_temp_float <= 50 and 0 <= off_temp_float <= 50):
+                    messagebox.showwarning("경고", "온도는 0~50°C 범위여야 합니다.")
+                    return
+                
+                if not (0 <= add_time <= 255):
+                    messagebox.showwarning("경고", "추가 시간은 0~255초 범위여야 합니다.")
+                    return
+                
+                # 온도를 정수부와 소수부로 분리
+                on_temp_int = int(on_temp_float)  # 정수부
+                on_temp_dec = int((on_temp_float - on_temp_int) * 10)  # 소수부 (0~9)
+                
+                off_temp_int = int(off_temp_float)  # 정수부
+                off_temp_dec = int((off_temp_float - off_temp_int) * 10)  # 소수부 (0~9)
+                
+                # DATA FIELD 구성 (5바이트 - 프로토콜에 맞춤)
+                data_field = bytearray(5)
+                data_field[0] = on_temp_int      # DATA 1: ON 온도 정수부
+                data_field[1] = on_temp_dec      # DATA 2: ON 온도 소수부
+                data_field[2] = off_temp_int     # DATA 3: OFF 온도 정수부
+                data_field[3] = off_temp_dec     # DATA 4: OFF 온도 소수부
+                data_field[4] = add_time         # DATA 5: 추가시간
+                
+                # 로그 출력
+                hex_data = " ".join([f"{b:02X}" for b in data_field])
+                self.log_communication(f"[냉각 제어] CMD 0xB1 전송", "blue")
+                self.log_communication(f"  ON온도: {on_temp_float}℃ (정수:{on_temp_int}, 소수:{on_temp_dec})", "gray")
+                self.log_communication(f"  OFF온도: {off_temp_float}℃ (정수:{off_temp_int}, 소수:{off_temp_dec})", "gray")
+                self.log_communication(f"  추가시간: {add_time}초", "gray")
+                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
+                
+                # CMD 0xB1 패킷 전송
+                success, message = self.comm.send_packet(0xB1, bytes(data_field))
+                
+                if success:
+                    self.log_communication(f"  전송 성공 (CMD 0xB1, 5바이트)", "green")
+                    
+                    # 입력 모드 비활성화
+                    self.cooling_edit_mode = False
+                    
+                    # Entry 위젯들을 읽기 전용으로 설정
+                    self.cooling_labels['on_temp'].config(state='readonly', bg='white')
+                    self.cooling_labels['off_temp'].config(state='readonly', bg='white')
+                    self.cooling_labels['cooling_additional_time'].config(state='readonly', bg='white')
+                    
+                    # 버튼 텍스트 변경
+                    self.cooling_send_btn.config(text="냉각 설정 입력 모드")
+                    
+                else:
+                    self.log_communication(f"  전송 실패: {message}", "red")
+                    
+            except ValueError:
+                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+            except Exception as e:
+                self.log_communication(f"냉각 제어 오류: {str(e)}", "red")
+    
+    def toggle_refrigerant_valve_target(self, event):
+        """냉매전환밸브 목표 토글 (냉각->제빙->핫가스->냉각)"""
+        if not self.hvac_edit_mode:
+            return
+        
+        valve_sequence = ['냉각', '제빙', '핫가스']
+        current_value = self.hvac_temp_data['refrigerant_valve_target']
+        
+        try:
+            current_index = valve_sequence.index(current_value)
+            next_index = (current_index + 1) % 3
+            next_value = valve_sequence[next_index]
         except ValueError:
-            messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
-        except Exception as e:
-            self.log_communication(f"냉각 제어 오류: {str(e)}", "red")
+            next_value = '냉각'
+        
+        self.hvac_temp_data['refrigerant_valve_target'] = next_value
+        
+        # UI 업데이트
+        colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
+        self.hvac_labels['refrigerant_valve_target'].config(
+            text=next_value, 
+            bg=colors.get(next_value, 'orange')
+        )
+
+    def toggle_compressor_state(self, event):
+        """압축기 상태 토글 (동작중<->미동작)"""
+        if not self.hvac_edit_mode:
+            return
+        
+        current_value = self.hvac_temp_data['compressor_state']
+        next_value = '미동작' if current_value == '동작중' else '동작중'
+        self.hvac_temp_data['compressor_state'] = next_value
+        
+        # UI 업데이트
+        if next_value == '동작중':
+            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
+        else:
+            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
+
+    def toggle_dc_fan1(self, event):
+        """압축기 팬 토글 (ON<->OFF)"""
+        if not self.hvac_edit_mode:
+            return
+        
+        current_value = self.hvac_temp_data['dc_fan1']
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        self.hvac_temp_data['dc_fan1'] = next_value
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
+
+    def toggle_dc_fan2(self, event):
+        """얼음탱크 팬 토글 (ON<->OFF)"""
+        if not self.hvac_edit_mode:
+            return
+        
+        current_value = self.hvac_temp_data['dc_fan2']
+        next_value = 'OFF' if current_value == 'ON' else 'ON'
+        self.hvac_temp_data['dc_fan2'] = next_value
+        
+        # UI 업데이트
+        if next_value == 'ON':
+            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
+        else:
+            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
+
+    def send_hvac_control(self):
+        """공조 제어 CMD 0xB0 전송 - 입력 모드 토글 방식"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        if not self.hvac_edit_mode:
+            # ========== 입력 모드 활성화 ==========
+            self.hvac_edit_mode = True
+            
+            # 현재 값을 임시 저장소에 복사
+            self.hvac_temp_data['refrigerant_valve_target'] = self.hvac_data['refrigerant_valve_target']
+            self.hvac_temp_data['compressor_state'] = self.hvac_data['compressor_state']
+            self.hvac_temp_data['target_rps'] = self.hvac_data['target_rps']
+            self.hvac_temp_data['dc_fan1'] = self.hvac_data['dc_fan1']
+            self.hvac_temp_data['dc_fan2'] = self.hvac_data['dc_fan2']
+            
+            # UI 업데이트 (임시 저장소 값으로)
+            colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
+            self.hvac_labels['refrigerant_valve_target'].config(
+                text=self.hvac_temp_data['refrigerant_valve_target'],
+                bg=colors.get(self.hvac_temp_data['refrigerant_valve_target'], 'orange')
+            )
+            
+            if self.hvac_temp_data['compressor_state'] == '동작중':
+                self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
+            else:
+                self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
+            
+            # 목표 RPS Entry 활성화
+            self.hvac_labels['target_rps'].config(state='normal', bg='lightyellow')
+            
+            if self.hvac_temp_data['dc_fan1'] == 'ON':
+                self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
+            else:
+                self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
+            
+            if self.hvac_temp_data['dc_fan2'] == 'ON':
+                self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
+            else:
+                self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
+            
+            # 버튼 텍스트 변경
+            self.hvac_send_btn.config(text="설정 완료 (CMD 0xB0 전송)")
+            
+            self.log_communication("공조 설정 입력 모드 활성화", "purple")
+        
+        else:
+            # ========== 입력 모드 비활성화 및 데이터 전송 ==========
+            try:
+                # 목표 RPS 가져오기
+                target_rps_str = self.hvac_labels['target_rps'].get()
+                
+                if not target_rps_str:
+                    messagebox.showwarning("경고", "목표 RPS를 입력해주세요.")
+                    return
+                
+                target_rps = int(target_rps_str)
+                
+                # 범위 체크 (0~255)
+                if not (0 <= target_rps <= 255):
+                    messagebox.showwarning("경고", "목표 RPS는 0~255 범위여야 합니다.")
+                    return
+                
+                # DATA FIELD 구성 (5바이트)
+                data_field = bytearray(5)
+                
+                # DATA 1: 냉매전환밸브 목표 (냉각=0, 제빙=1, 핫가스=2)
+                valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2}
+                data_field[0] = valve_map[self.hvac_temp_data['refrigerant_valve_target']]
+                
+                # DATA 2: 압축기 상태 (동작=1, 미동작=0)
+                data_field[1] = 1 if self.hvac_temp_data['compressor_state'] == '동작중' else 0
+                
+                # DATA 3: 목표 RPS
+                data_field[2] = target_rps
+                
+                # DATA 4: DC FAN 1 (압축기 팬, ON=1, OFF=0)
+                data_field[3] = 1 if self.hvac_temp_data['dc_fan1'] == 'ON' else 0
+                
+                # DATA 5: DC FAN 2 (얼음탱크 팬, ON=1, OFF=0)
+                data_field[4] = 1 if self.hvac_temp_data['dc_fan2'] == 'ON' else 0
+                
+                # 로그 출력
+                hex_data = " ".join([f"{b:02X}" for b in data_field])
+                self.log_communication(f"[공조 제어] CMD 0xB0 전송", "blue")
+                self.log_communication(f"  냉매전환밸브 목표: {self.hvac_temp_data['refrigerant_valve_target']} ({data_field[0]})", "gray")
+                self.log_communication(f"  압축기 상태: {self.hvac_temp_data['compressor_state']} ({data_field[1]})", "gray")
+                self.log_communication(f"  목표 RPS: {target_rps}", "gray")
+                self.log_communication(f"  압축기 팬: {self.hvac_temp_data['dc_fan1']} ({data_field[3]})", "gray")
+                self.log_communication(f"  얼음탱크 팬: {self.hvac_temp_data['dc_fan2']} ({data_field[4]})", "gray")
+                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
+                
+                # CMD 0xB0 패킷 전송
+                success, message = self.comm.send_packet(0xB0, bytes(data_field))
+                
+                if success:
+                    self.log_communication(f"  전송 성공 (CMD 0xB0, 5바이트)", "green")
+                    
+                    # 입력 모드 비활성화
+                    self.hvac_edit_mode = False
+                    
+                    # 목표 RPS Entry 읽기 전용으로 설정
+                    self.hvac_labels['target_rps'].config(state='readonly', bg='white')
+                    
+                    # 버튼 텍스트 변경
+                    self.hvac_send_btn.config(text="공조 설정 입력 모드")
+                    
+                else:
+                    self.log_communication(f"  전송 실패: {message}", "red")
+                    
+            except ValueError:
+                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
+            except Exception as e:
+                self.log_communication(f"공조 제어 오류: {str(e)}", "red")
     
     def create_hvac_area(self, parent):
         """공조시스템 섹션 생성"""
@@ -411,46 +643,51 @@ class MainGUI:
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['refrigerant_valve_state'] = tk.Label(state_frame, text="핫가스", 
-                                                              fg="white", bg="red", font=("Arial", 8, "bold"),
-                                                              width=8, relief="raised")
+                                                            fg="white", bg="red", font=("Arial", 8, "bold"),
+                                                            width=8, relief="raised")
         self.hvac_labels['refrigerant_valve_state'].pack(side=tk.RIGHT)
         
-        # 목표
+        # 목표 (버튼으로 변경)
         target_frame = ttk.Frame(valve_subframe)
         target_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(target_frame, text="목표:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['refrigerant_valve_target'] = tk.Label(target_frame, text="핫가스", 
-                                                               fg="white", bg="orange", font=("Arial", 8, "bold"),
-                                                               width=8, relief="raised")
+                                                            fg="white", bg="orange", font=("Arial", 8, "bold"),
+                                                            width=8, relief="raised", cursor="hand2")
         self.hvac_labels['refrigerant_valve_target'].pack(side=tk.RIGHT)
+        self.hvac_labels['refrigerant_valve_target'].bind("<Button-1>", self.toggle_refrigerant_valve_target)
         
         # 압축기 서브프레임
         comp_subframe = ttk.LabelFrame(hvac_frame, text="압축기", padding="3")
         comp_subframe.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         
-        # 상태
+        # 상태 (버튼으로 변경)
         comp_state_frame = ttk.Frame(comp_subframe)
         comp_state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(comp_state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['compressor_state'] = tk.Label(comp_state_frame, text="미동작", 
-                                                       fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                                       width=8, relief="raised")
+                                                    fg="white", bg="gray", font=("Arial", 8, "bold"),
+                                                    width=8, relief="raised", cursor="hand2")
         self.hvac_labels['compressor_state'].pack(side=tk.RIGHT)
+        self.hvac_labels['compressor_state'].bind("<Button-1>", self.toggle_compressor_state)
         
         # 현재 RPS
         curr_rps_frame = ttk.Frame(comp_subframe)
         curr_rps_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(curr_rps_frame, text="현재 RPS:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['current_rps'] = tk.Label(curr_rps_frame, text="0", 
-                                                  font=("Arial", 8), bg="white", relief="sunken")
+                                                font=("Arial", 8), bg="white", relief="sunken")
         self.hvac_labels['current_rps'].pack(side=tk.RIGHT)
         
-        # 목표 RPS
+        # 목표 RPS (Entry로 변경)
         target_rps_frame = ttk.Frame(comp_subframe)
         target_rps_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['target_rps'] = tk.Label(target_rps_frame, text="0", 
-                                                 font=("Arial", 8), bg="white", relief="sunken")
+        vcmd_rps = (self.root.register(self.validate_number), '%P')
+        self.hvac_labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 8), 
+                                                width=8, validate='key', validatecommand=vcmd_rps,
+                                                state='readonly')
+        self.hvac_labels['target_rps'].insert(0, "0")
         self.hvac_labels['target_rps'].pack(side=tk.RIGHT)
         
         # 에러코드
@@ -458,26 +695,35 @@ class MainGUI:
         error_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(error_frame, text="에러코드:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['error_code'] = tk.Label(error_frame, text="0", 
-                                                 font=("Arial", 8), bg="white", relief="sunken")
+                                                font=("Arial", 8), bg="white", relief="sunken")
         self.hvac_labels['error_code'].pack(side=tk.RIGHT)
         
-        # DC FAN 1
+        # DC FAN 1 (압축기 팬, 버튼으로 변경)
         fan1_frame = ttk.Frame(comp_subframe)
         fan1_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(fan1_frame, text="DC FAN 1:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Label(fan1_frame, text="압축기 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['dc_fan1'] = tk.Label(fan1_frame, text="OFF", 
-                                              fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                              width=5, relief="raised")
+                                            fg="white", bg="gray", font=("Arial", 8, "bold"),
+                                            width=5, relief="raised", cursor="hand2")
         self.hvac_labels['dc_fan1'].pack(side=tk.RIGHT)
+        self.hvac_labels['dc_fan1'].bind("<Button-1>", self.toggle_dc_fan1)
         
-        # DC FAN 2
+        # DC FAN 2 (얼음탱크 팬, 버튼으로 변경)
         fan2_frame = ttk.Frame(comp_subframe)
         fan2_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(fan2_frame, text="DC FAN 2:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Label(fan2_frame, text="얼음탱크 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['dc_fan2'] = tk.Label(fan2_frame, text="OFF", 
-                                              fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                              width=5, relief="raised")
+                                            fg="white", bg="gray", font=("Arial", 8, "bold"),
+                                            width=5, relief="raised", cursor="hand2")
         self.hvac_labels['dc_fan2'].pack(side=tk.RIGHT)
+        self.hvac_labels['dc_fan2'].bind("<Button-1>", self.toggle_dc_fan2)
+        
+        # CMD 0xB0 전송 버튼
+        send_btn_frame = ttk.Frame(hvac_frame)
+        send_btn_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 1))
+        self.hvac_send_btn = ttk.Button(send_btn_frame, text="공조 설정 입력 모드",
+                                        command=self.send_hvac_control, state="disabled")
+        self.hvac_send_btn.pack(fill=tk.X)
         
         valve_subframe.columnconfigure(0, weight=1)
         comp_subframe.columnconfigure(0, weight=1)
@@ -948,6 +1194,10 @@ class MainGUI:
                 # 냉각 제어 버튼 활성화
                 if hasattr(self, 'cooling_send_btn'):
                     self.cooling_send_btn.config(state="normal")
+
+                # 공조 제어 버튼 활성화
+                if hasattr(self, 'hvac_send_btn'):
+                    self.hvac_send_btn.config(state="normal")
                 
                 self.log_communication(f"포트 {port} 연결됨", "green")
             else:
@@ -969,6 +1219,10 @@ class MainGUI:
                 # 냉각 제어 버튼 비활성화
                 if hasattr(self, 'cooling_send_btn'):
                     self.cooling_send_btn.config(state="disabled")
+                
+                # 공조 제어 버튼 비활성화
+                if hasattr(self, 'hvac_send_btn'):
+                    self.hvac_send_btn.config(state="disabled")
                 
                 self.log_communication("연결 해제됨", "orange")
     
@@ -1120,6 +1374,18 @@ class MainGUI:
                 try:
                     data_string = data_field.decode('utf-8', errors='ignore')
                     self.parse_and_update_data(data_string)
+
+                    # CMD 0xB2 수신 처리 예시 (data_field에서 읽는 경우)
+                    if cmd == 0xB2 and len(data_field) >= 5:
+                        on_temp_int = data_field[0]
+                        on_temp_dec = data_field[1]
+                        off_temp_int = data_field[2]
+                        off_temp_dec = data_field[3]
+                        add_time = data_field[4]
+                        
+                        self.cooling_data['on_temp'] = on_temp_int + (on_temp_dec / 10.0)
+                        self.cooling_data['off_temp'] = off_temp_int + (off_temp_dec / 10.0)
+                        self.cooling_data['cooling_additional_time'] = add_time
                 except:
                     pass
         
@@ -1354,24 +1620,72 @@ class MainGUI:
                 else:
                     label.config(text=str(value))
         
-        # 냉각 시스템 상태 업데이트 (입력 중이 아닐 때만)
+        # 냉각 시스템 상태 업데이트
         for cooling_key, value in self.cooling_data.items():
             if cooling_key in self.cooling_labels:
                 widget = self.cooling_labels[cooling_key]
                 if cooling_key == 'operation_state':
-                    # 운전 상태는 Label
+                    # 운전 상태는 항상 업데이트
                     if value == 'GOING':
                         widget.config(text="GOING", bg="green")
                     else:
                         widget.config(text="STOP", bg="red")
                 elif cooling_key in ['on_temp', 'off_temp', 'cooling_additional_time']:
-                    # Entry 위젯이고 포커스 중이 아닐 때만 업데이트
-                    if not self.cooling_input_focus.get(cooling_key, False):
+                    # 입력 모드가 아닐 때만 Entry 위젯 업데이트
+                    if not self.cooling_edit_mode:
                         current_value = widget.get()
                         new_value = str(value)
                         if current_value != new_value:
+                            widget.config(state='normal')
                             widget.delete(0, tk.END)
                             widget.insert(0, new_value)
+                            widget.config(state='readonly')
+
+        # 공조시스템 상태 업데이트
+        for hvac_key, value in self.hvac_data.items():
+            if hvac_key in self.hvac_labels:
+                label = self.hvac_labels[hvac_key]
+                if hvac_key == 'refrigerant_valve_state':
+                    # 상태는 항상 업데이트
+                    colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
+                    color = colors.get(value, 'gray')
+                    label.config(text=value, bg=color)
+                elif hvac_key == 'refrigerant_valve_target':
+                    # 입력 모드가 아닐 때만 업데이트
+                    if not self.hvac_edit_mode:
+                        colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
+                        color = colors.get(value, 'orange')
+                        label.config(text=value, bg=color)
+                elif hvac_key == 'compressor_state':
+                    # 상태는 항상 업데이트 (하지만 입력 모드에서는 제어용 라벨 표시)
+                    if not self.hvac_edit_mode:
+                        if value == '동작중':
+                            label.config(text="동작중", bg="green")
+                        else:
+                            label.config(text="미동작", bg="gray")
+                elif hvac_key == 'target_rps':
+                    # 입력 모드가 아닐 때만 업데이트
+                    if not self.hvac_edit_mode:
+                        current_value = label.get()
+                        new_value = str(value)
+                        if current_value != new_value:
+                            label.config(state='normal')
+                            label.delete(0, tk.END)
+                            label.insert(0, new_value)
+                            label.config(state='readonly')
+                elif hvac_key in ['dc_fan1', 'dc_fan2']:
+                    # 입력 모드가 아닐 때만 업데이트
+                    if not self.hvac_edit_mode:
+                        if value == 'ON':
+                            label.config(text="ON", bg="green")
+                        else:
+                            label.config(text="OFF", bg="gray")
+                elif hvac_key == 'current_rps':
+                    # 현재 RPS는 항상 업데이트
+                    label.config(text=str(value))
+                elif hvac_key == 'error_code':
+                    # 에러코드는 항상 업데이트
+                    label.config(text=str(value))
         
         # 제빙 시스템 상태 업데이트
         for ice_key, value in self.icemaking_data.items():
@@ -1463,6 +1777,27 @@ class MainGUI:
                     self.canvas1_freezing.draw_idle()
                 except Exception:
                     pass
+
+            # 냉각 시스템 상태 업데이트 (입력 모드가 아닐 때만)
+            if not self.cooling_edit_mode:  # 입력 모드가 아닐 때만 업데이트
+                for cooling_key, value in self.cooling_data.items():
+                    if cooling_key in self.cooling_labels:
+                        widget = self.cooling_labels[cooling_key]
+                        if cooling_key == 'operation_state':
+                            # 운전 상태는 Label
+                            if value == 'GOING':
+                                widget.config(text="GOING", bg="green")
+                            else:
+                                widget.config(text="STOP", bg="red")
+                        elif cooling_key in ['on_temp', 'off_temp', 'cooling_additional_time']:
+                            # Entry 위젯 업데이트 (readonly 상태에서만)
+                            current_value = widget.get()
+                            new_value = str(value)
+                            if current_value != new_value:
+                                widget.config(state='normal')
+                                widget.delete(0, tk.END)
+                                widget.insert(0, new_value)
+                                widget.config(state='readonly')
             
             # 제어검토용 탭의 그래프 1 업데이트
             if hasattr(self, 'temp_ax_control'):
