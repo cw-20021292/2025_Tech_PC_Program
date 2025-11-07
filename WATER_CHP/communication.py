@@ -22,33 +22,78 @@ class ProtocolHandler:
     MAIN_ID = 0x02
     FRONT_ID = 0x03
     
-    # CMD와 DATA FIELD LENGTH 매핑
+    # CMD와 DATA FIELD LENGTH 매핑 (PC → 메인)
     CMD_LENGTH_MAP = {
-        0x0F: 0,   # Heartbeat
-        0xA0: 20,  # 밸브 제어 (NOS 1~5: 5바이트, FEED 1~15: 15바이트)
-        0xA1: 1,
-        0xB0: 5,
-        0xB1: 5,   # 냉각 제어 (ON온도 정수부, ON온도 소수부, OFF온도 정수부, OFF온도 소수부, 추가시간)
-        0xB2: 7,
-        0xB3: 48,
-        0xC0: 7
+        0xF0: 0,   # 상태조회 (POLLING)
+        0xA0: 20,  # 밸브 부하 변경 (DATA1~5: NOS 밸브, DATA6~20: FEED 밸브)
+        0xA1: 1,   # 드레인 펌프 출력 변경
+        0xB0: 4,   # 공조시스템
+        0xB1: 4,   # 냉각운전 변경 (TARGET RPS, TARGET TEMP, 냉각 동작, 냉각 ON 온도)
+        0xB2: 7,   # 제빙운전 변경 (TARGET RPS, TARGET TEMP, 제빙 동작, 제빙시간, 입수용량)
+        0xB3: 48,  # 제빙테이블 적용
+        0xB4: 4,   # 보냉운전 변경 (TARGET RPS, TARGET TEMP, TARGET TEMP FIRST, TRAY POSITION)
+        0xC0: 7    # 센서값 변경
     }
     
     def __init__(self):
         self.receive_buffer = bytearray()
     
+    @staticmethod
+    def int_to_signed_byte(value):
+        """
+        정수를 signed byte로 변환 (부호-크기 표현)
+        1바이트에서 최상위 비트(MSB)가 1이면 음수, 0이면 양수
+        범위: -127 ~ 127 (0은 양수로 처리)
+        부호-크기(sign-magnitude) 표현 사용
+        """
+        if value < -127 or value > 127:
+            raise ValueError(f"값이 signed byte 범위(-127~127)를 벗어났습니다: {value}")
+        
+        if value < 0:
+            # 음수: MSB를 1로 설정하고 절대값을 하위 7비트에 저장
+            # 예: -1 -> 0x81 (1000 0001) = 128 | 1
+            # 예: -40 -> 0xA8 (1010 1000) = 128 | 40
+            # 예: -80 -> 0xF0 (1111 0000) = 128 | 80
+            return 0x80 | abs(value)
+        else:
+            # 양수: MSB가 0이므로 그대로 반환
+            # 예: 1 -> 0x01 (0000 0001)
+            # 예: 80 -> 0x50 (0101 0000)
+            return value
+    
+    @staticmethod
+    def signed_byte_to_int(byte_value):
+        """
+        signed byte를 정수로 변환 (부호-크기 표현)
+        최상위 비트(MSB)가 1이면 음수, 0이면 양수
+        """
+        if byte_value & 0x80:
+            # MSB가 1이면 음수: 하위 7비트의 절대값에 음수 부호 적용
+            # 예: 0x81 -> -1, 0xA8 -> -40, 0xF0 -> -80
+            return -(byte_value & 0x7F)
+        else:
+            # MSB가 0이면 양수: 그대로 반환
+            # 예: 0x01 -> 1, 0x50 -> 80
+            return byte_value
+    
     def calculate_crc16(self, data):
-        """CRC16-CCITT 계산 (STX ~ DATA FIELD)"""
-        crc = 0xFFFF
-        for byte in data:
-            crc ^= byte << 8
-            for _ in range(8):
-                if crc & 0x8000:
-                    crc = (crc << 1) ^ 0x1021
+        """
+        CRC16-CCITT 계산 (STX ~ DATA FIELD)
+        초기값: 0x0000
+        다항식: 0x1021
+        """
+        wCRCin = 0x0000  # 초기값 변경: 0xFFFF -> 0x0000
+        wCPoly = 0x1021
+        
+        for wChar in data:
+            wCRCin ^= (wChar << 8)
+            for i in range(8):
+                if wCRCin & 0x8000:
+                    wCRCin = (wCRCin << 1) ^ wCPoly
                 else:
-                    crc = crc << 1
-                crc &= 0xFFFF
-        return crc
+                    wCRCin = wCRCin << 1
+                wCRCin &= 0xFFFF
+        return wCRCin
     
     def create_packet(self, tx_id, rx_id, cmd, data_field=None):
         """
@@ -77,7 +122,11 @@ class ProtocolHandler:
         
         # CRC16 계산 (STX ~ DATA FIELD)
         crc = self.calculate_crc16(packet)
-        packet.extend(struct.pack('>H', crc))  # Big-endian 2바이트
+        # CRC를 ETX 앞에 CRC_HIGHBYTE와 CRC_LOWBYTE 순서로 추가
+        crc_high = (crc >> 8) & 0xFF  # CRC_HIGHBYTE
+        crc_low = crc & 0xFF          # CRC_LOWBYTE
+        packet.append(crc_high)
+        packet.append(crc_low)
         
         packet.append(self.ETX)
         
@@ -105,7 +154,10 @@ class ProtocolHandler:
                 return None
             
             data_field = packet_data[5:5+data_length]
-            crc_received = struct.unpack('>H', packet_data[5+data_length:7+data_length])[0]
+            # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
+            crc_high = packet_data[5+data_length]
+            crc_low = packet_data[5+data_length+1]
+            crc_received = (crc_high << 8) | crc_low
             etx = packet_data[-1]
             
             # 검증
@@ -335,7 +387,18 @@ class SerialCommunication:
             if rx_id is None:
                 rx_id = self.protocol.MAIN_ID
             
+            # 패킷 생성 (STX와 ETX 포함)
             packet = self.protocol.create_packet(tx_id, rx_id, cmd, data_field)
+            
+            # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
+            if len(packet) < 2:
+                return False, "패킷이 너무 짧습니다"
+            if packet[0] != self.protocol.STX:
+                return False, f"패킷 시작이 STX(0x{self.protocol.STX:02X})가 아닙니다: 0x{packet[0]:02X}"
+            if packet[-1] != self.protocol.ETX:
+                return False, f"패킷 끝이 ETX(0x{self.protocol.ETX:02X})가 아닙니다: 0x{packet[-1]:02X}"
+            
+            # 전송 대기열에 추가
             self.send_queue.put(packet)
             return True, "패킷 전송 대기열 추가"
         except Exception as e:
@@ -368,8 +431,18 @@ class SerialCommunication:
                 data = self.send_queue.get(timeout=0.1)
                 
                 if self.serial_connection and self.serial_connection.is_open:
-                    self.serial_connection.write(data)
-                    self.receive_queue.put(('SENT', data))
+                    # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
+                    if len(data) >= 2:
+                        if data[0] != self.protocol.STX:
+                            self.receive_queue.put(('ERROR', f"전송 패킷 시작이 STX가 아닙니다: 0x{data[0]:02X}"))
+                        elif data[-1] != self.protocol.ETX:
+                            self.receive_queue.put(('ERROR', f"전송 패킷 끝이 ETX가 아닙니다: 0x{data[-1]:02X}"))
+                        else:
+                            # STX와 ETX가 포함된 전체 패킷 전송
+                            self.serial_connection.write(data)
+                            self.receive_queue.put(('SENT', data))
+                    else:
+                        self.receive_queue.put(('ERROR', f"전송 패킷이 너무 짧습니다: {len(data)}바이트"))
                 
             except queue.Empty:
                 continue
@@ -465,17 +538,23 @@ class DataParser:
         self.receive_buffer = bytearray()
     
     def calculate_crc16(self, data):
-        """CRC16-CCITT 계산 (STX ~ DATA FIELD)"""
-        crc = 0xFFFF
-        for byte in data:
-            crc ^= byte << 8
-            for _ in range(8):
-                if crc & 0x8000:
-                    crc = (crc << 1) ^ 0x1021
+        """
+        CRC16-CCITT 계산 (STX ~ DATA FIELD)
+        초기값: 0x0000
+        다항식: 0x1021
+        """
+        wCRCin = 0x0000  # 초기값 변경: 0xFFFF -> 0x0000
+        wCPoly = 0x1021
+        
+        for wChar in data:
+            wCRCin ^= (wChar << 8)
+            for i in range(8):
+                if wCRCin & 0x8000:
+                    wCRCin = (wCRCin << 1) ^ wCPoly
                 else:
-                    crc = crc << 1
-                crc &= 0xFFFF
-        return crc
+                    wCRCin = wCRCin << 1
+                wCRCin &= 0xFFFF
+        return wCRCin
     
     def create_packet(self, tx_id, rx_id, cmd, data_field=None):
         """
@@ -504,7 +583,11 @@ class DataParser:
         
         # CRC16 계산 (STX ~ DATA FIELD)
         crc = self.calculate_crc16(packet)
-        packet.extend(struct.pack('>H', crc))  # Big-endian 2바이트
+        # CRC를 ETX 앞에 CRC_HIGHBYTE와 CRC_LOWBYTE 순서로 추가
+        crc_high = (crc >> 8) & 0xFF  # CRC_HIGHBYTE
+        crc_low = crc & 0xFF          # CRC_LOWBYTE
+        packet.append(crc_high)
+        packet.append(crc_low)
         
         packet.append(self.ETX)
         
@@ -532,7 +615,10 @@ class DataParser:
                 return None
             
             data_field = packet_data[5:5+data_length]
-            crc_received = struct.unpack('>H', packet_data[5+data_length:7+data_length])[0]
+            # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
+            crc_high = packet_data[5+data_length]
+            crc_low = packet_data[5+data_length+1]
+            crc_received = (crc_high << 8) | crc_low
             etx = packet_data[-1]
             
             # 검증
@@ -762,7 +848,18 @@ class SerialCommunication:
             if rx_id is None:
                 rx_id = self.protocol.MAIN_ID
             
+            # 패킷 생성 (STX와 ETX 포함)
             packet = self.protocol.create_packet(tx_id, rx_id, cmd, data_field)
+            
+            # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
+            if len(packet) < 2:
+                return False, "패킷이 너무 짧습니다"
+            if packet[0] != self.protocol.STX:
+                return False, f"패킷 시작이 STX(0x{self.protocol.STX:02X})가 아닙니다: 0x{packet[0]:02X}"
+            if packet[-1] != self.protocol.ETX:
+                return False, f"패킷 끝이 ETX(0x{self.protocol.ETX:02X})가 아닙니다: 0x{packet[-1]:02X}"
+            
+            # 전송 대기열에 추가
             self.send_queue.put(packet)
             return True, "패킷 전송 대기열 추가"
         except Exception as e:
@@ -795,8 +892,18 @@ class SerialCommunication:
                 data = self.send_queue.get(timeout=0.1)
                 
                 if self.serial_connection and self.serial_connection.is_open:
-                    self.serial_connection.write(data)
-                    self.receive_queue.put(('SENT', data))
+                    # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
+                    if len(data) >= 2:
+                        if data[0] != self.protocol.STX:
+                            self.receive_queue.put(('ERROR', f"전송 패킷 시작이 STX가 아닙니다: 0x{data[0]:02X}"))
+                        elif data[-1] != self.protocol.ETX:
+                            self.receive_queue.put(('ERROR', f"전송 패킷 끝이 ETX가 아닙니다: 0x{data[-1]:02X}"))
+                        else:
+                            # STX와 ETX가 포함된 전체 패킷 전송
+                            self.serial_connection.write(data)
+                            self.receive_queue.put(('SENT', data))
+                    else:
+                        self.receive_queue.put(('ERROR', f"전송 패킷이 너무 짧습니다: {len(data)}바이트"))
                 
             except queue.Empty:
                 continue

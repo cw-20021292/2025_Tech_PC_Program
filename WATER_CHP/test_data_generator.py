@@ -47,6 +47,16 @@ class TestDataGenerator:
             'swing_on_time': random.randint(100, 300),
             'swing_off_time': random.randint(400, 800)
         }
+
+        # 보냉시스템 상태
+        self.refrigeration_states = {
+            'operation': random.choice(['보냉대기', '보냉진행', '보냉완료', '만빙대기']),
+            'refrigerant_valve_state': random.choice(['핫가스', '냉각', '제빙']),
+            'target_rps': random.randint(0, 100),               ## 보냉진행 설정 RPS
+            'target_temp': random.randint(-20, 100),            ## 보냉진행 설정온도
+            'target_first_temp': random.randint(-20, 100),      ## 보냉진행 첫 온도
+            'cur_tray_position': random.choice(['제빙', '중간', '탈빙']),
+        }
         
         # 드레인탱크 상태
         self.drain_tank_states = {
