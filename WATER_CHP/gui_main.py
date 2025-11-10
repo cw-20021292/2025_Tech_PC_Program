@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import os
 from datetime import datetime
 from collections import deque
 
@@ -21,6 +22,7 @@ plt.rcParams['axes.unicode_minus'] = False
 from communication import SerialCommunication, DataParser
 from systems import RefrigerationSystem
 import constants
+from excel_sheet_selector import ExcelSheetSelector
 
 
 class MainGUI:
@@ -119,6 +121,9 @@ class MainGUI:
         
         # 보냉시스템 모듈 초기화
         self.refrigeration_system = RefrigerationSystem(self.root, self.comm, self.log_communication)
+        
+        # Excel Sheet 선택 모듈 초기화
+        self.excel_sheet_selector = ExcelSheetSelector(self.root)
         
         # 그래프 데이터
         self.graph_data = {
@@ -629,34 +634,41 @@ class MainGUI:
             except ValueError:
                 messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
             except Exception as e:
-                # self.log_communication(f"제빙 제어 오류: {str(e)}", "red")_communication(f"  스윙바 OFF: {swing_off}ms", "gray")
-                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
-                
-                # CMD 0xB2 패킷 전송
-                success, message = self.comm.send_packet(0xB2, bytes(data_field))
-                
-                if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB2, 5바이트)", "green")
-                    
-                    # 입력 모드 비활성화
-                    self.icemaking_edit_mode = False
-                    
-                    # Entry 위젯들을 읽기 전용으로 설정
-                    self.icemaking_labels['icemaking_time'].config(state='readonly', bg='white')
-                    self.icemaking_labels['water_capacity'].config(state='readonly', bg='white')
-                    self.icemaking_labels['swing_on_time'].config(state='readonly', bg='white')
-                    self.icemaking_labels['swing_off_time'].config(state='readonly', bg='white')
-                    
-                    # 버튼 텍스트 변경
-                    self.icemaking_send_btn.config(text="제빙 설정 입력 모드")
-                    
-                else:
-                    self.log_communication(f"  전송 실패: {message}", "red")
-                    
-            except ValueError:
-                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
-            except Exception as e:
                 self.log_communication(f"제빙 제어 오류: {str(e)}", "red")
+    
+    def apply_icemaking_table(self):
+        """제빙테이블 적용 - Excel 파일 선택 및 Sheet 선택"""
+        if not self.comm.is_connected:
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            return
+        
+        def on_sheet_selected(sheet_name):
+            """Sheet 선택 시 호출되는 콜백 함수"""
+            if sheet_name:
+                self.log_communication(
+                    f"제빙테이블 적용: Excel 파일={self.excel_sheet_selector.selected_file_path}, "
+                    f"Sheet={sheet_name}",
+                    "blue"
+                )
+                file_name = os.path.basename(self.excel_sheet_selector.selected_file_path)
+                messagebox.showinfo(
+                    "알림",
+                    f"Sheet '{sheet_name}'가 선택되었습니다.\n\n"
+                    f"파일: {file_name}\n"
+                    f"Sheet: {sheet_name}\n\n"
+                    "추가 처리 로직은 이후 구현 예정입니다."
+                )
+        
+        # Excel 파일 선택 및 Sheet 선택 다이얼로그 표시
+        selected_sheet = self.excel_sheet_selector.show_sheet_selection_dialog(
+            callback=on_sheet_selected
+        )
+        
+        if selected_sheet:
+            self.log_communication(
+                f"제빙테이블 적용 완료: Sheet={selected_sheet}",
+                "green"
+            )
     
     def toggle_refrigerant_valve_target(self, event):
         """냉매전환밸브 목표 토글 (냉각->제빙->핫가스->냉각)"""
@@ -1213,6 +1225,13 @@ class MainGUI:
                                         command=self.send_icemaking_control, state="disabled")
         self.icemaking_send_btn.pack(fill=tk.X)
         
+        # 제빙테이블 적용 버튼
+        table_btn_frame = ttk.Frame(icemaking_frame)
+        table_btn_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        self.icemaking_table_btn = ttk.Button(table_btn_frame, text="제빙테이블 적용",
+                                        command=self.apply_icemaking_table, state="disabled")
+        self.icemaking_table_btn.pack(fill=tk.X)
+        
         icemaking_frame.columnconfigure(0, weight=1)
     
     def create_graph_areas(self, parent):
@@ -1640,6 +1659,10 @@ class MainGUI:
                 if hasattr(self, 'icemaking_send_btn'):
                     self.icemaking_send_btn.config(state="normal")
                 
+                # 제빙테이블 적용 버튼 활성화
+                if hasattr(self, 'icemaking_table_btn'):
+                    self.icemaking_table_btn.config(state="normal")
+                
                 # 보냉 제어 버튼 활성화
                 self.refrigeration_system.set_connection_state(True)
                 
@@ -1671,6 +1694,10 @@ class MainGUI:
                 # 제빙 제어 버튼 비활성화 추가
                 if hasattr(self, 'icemaking_send_btn'):
                     self.icemaking_send_btn.config(state="disabled")
+                
+                # 제빙테이블 적용 버튼 비활성화
+                if hasattr(self, 'icemaking_table_btn'):
+                    self.icemaking_table_btn.config(state="disabled")
                 
                 # 보냉 제어 버튼 비활성화
                 self.refrigeration_system.set_connection_state(False)
