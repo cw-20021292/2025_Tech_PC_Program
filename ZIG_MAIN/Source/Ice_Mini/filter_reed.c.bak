@@ -1,0 +1,670 @@
+/***********************************************************************************************************************
+* Version      : BAS25(STEP_UP)
+* File Name    : Main.c
+* Device(s)    : R5F100MG
+* Creation Date: 2015/07/31
+* Copyright    : Coway_Electronics Engineering Team (DH,Kim)
+* Description  : AT+CONNECT=74F07DB01010
+***********************************************************************************************************************/
+#include    "Macrodriver.h"
+#include    "Global_Variable.h"
+#include    "Port_Define.h"
+#include    "filter_reed.h"
+
+void input_filter_reed_sw(void);
+
+
+
+TYPE_BYTE          U8FilterResetStateB;
+#define            u8FilterResetState                            U8FilterResetStateB.byte
+#define            Bit0_Neo_Filter_1_Reset_State                 U8FilterResetStateB.Bit.b0
+#define            Bit1_Ro_Filter_2_Reset_State                  U8FilterResetStateB.Bit.b1
+#define            Bit2_Ino_Filter_3_Reset_State                 U8FilterResetStateB.Bit.b2
+
+bit bit_filter_cover;
+bit bit_filter_cover_open_to_close;
+bit bit_filter_reed;		/* 필터리드 스위치 bit 추가 */
+bit bit_filter_reed_old;
+
+U16 gu16_filter_reset_timer_sec;
+U8 gu8_filter_reset_timer_min;
+U16 gu16_reset_day_filter;
+
+bit bit_neo_filter_1_reed;
+bit bit_ro_filter_2_reed;
+bit bit_ino_filter_3_reed;
+
+bit bit_acid_reed;
+
+
+U8 gu8_filter_cover_reed_on_decision_cnt;
+U8 gu8_filter_cover_reed_off_decision_cnt;
+
+U8 gu8_filter_reed_on_decision_cnt;
+U8 gu8_filter_reed_off_decision_cnt;
+
+U8 gu8_neo_reed_on_decision_cnt;
+U8 gu8_neo_reed_off_decision_cnt;
+
+U8 gu8_ro_reed_on_decision_cnt;
+U8 gu8_ro_reed_off_decision_cnt;
+
+U8 gu8_ino_reed_on_decision_cnt;
+U8 gu8_ino_reed_off_decision_cnt;
+
+U8 gu8_acid_reed_on_decision_cnt;
+U8 gu8_acid_reed_off_decision_cnt;
+
+
+bit bit_neo_filter_1_reed_old;
+bit bit_ro_filter_2_reed_old;
+bit bit_ino_filter_3_reed_old;
+
+bit bit_acid_reed_old;
+
+#if 0
+U16 gu16_neo_filter_reset_timer_sec;
+U8 gu8_neo_filter_reset_timer_min;
+U8 gu8_neo_filter_reset_timer_hour;
+
+
+U16 gu16_ro_filter_reset_timer_sec;
+U8 gu8_ro_filter_reset_timer_min;
+U8 gu8_ro_filter_reset_timer_hour;
+#endif
+
+
+
+
+/*U16 gu16_filter_reset_day_neo;*/
+/*U16 gu16_filter_reset_day_ro;*/
+
+
+U16 gu16_reset_hour_neo_filter;
+U16 gu16_reset_hour_ro_filter;
+U16 gu16_reset_hour_ino_filter;
+
+
+U16 gu16_neo_filter_reset_timer_sec;
+U8 gu8_neo_filter_reset_timer_min;
+U8 gu8_neo_filter_reset_timer_hour;
+
+
+U16 gu16_ro_filter_reset_timer_sec;
+U8 gu8_ro_filter_reset_timer_min;
+U8 gu8_ro_filter_reset_timer_hour;
+
+U16 gu16_ino_filter_reset_timer_sec;
+U8 gu8_ino_filter_reset_timer_min;
+U8 gu8_ino_filter_reset_timer_hour;
+
+
+U16 gu16_display_filter_remain_day;
+bit bit_filter_alarm_start;
+
+
+
+bit bit_filter_alarm_1_3_voice;
+bit bit_filter_alarm_1_2_3_voice;
+
+
+
+bit bit_neo_filter_1_alarm;
+bit bit_ro_filter_2_alarm;
+bit bit_ino_filter_3_alarm;
+
+U16 gu16_neo_filter_1_remain_day;
+U16 gu16_ro_filter_2_remain_day;
+U16 gu16_ino_filter_3_remain_day;
+
+
+U8 gu8_filter_change_type;
+
+
+U8 gu8_filter_alarm_popup_enable;
+
+
+bit bit_yes_no_popup;			/* 필터 교체 플러싱을 진행할지 말지 결정할 때 SET */
+bit bit_filter_all;
+
+bit bit_filter_reset_yes;		/* 필터 교체 진행 플래그 (대기중 물추출 키) */
+bit bit_filter_reset_no;		/* 필터 교체 취소 플래그 (대기중 냉수 키) */
+
+bit bit_wifi_neo_filter_1_reset;
+bit bit_wifi_ro_filter_2_reset;
+bit bit_wifi_ino_filter_3_reset;
+
+
+U16 gu16_filter_change_reset_timer;
+
+U16 gu16_1_3_remain_day_before;
+U16 gu16_1_2_3_remain_day_before;
+
+U8 gu8_filter_cover_reed_data;		/* 필터커버 리드스위치 port 입력 데이터 */
+
+extern bit bit_filter_reed;
+extern U8 gu8_front_rcv_filter_reed_data;
+
+bit f_boot;
+
+bit bit_filter_flushing_check;
+
+void start_filter_flushing(void);
+void reset_time_ino_filter(void);
+void filter_reset(void);
+void init_filter(void);
+/******************************************************************************************************/
+/**
+ * @brief 필터 고정 리드스위치 감지
+ * 
+ */
+void input_filter_reed_sw(void)
+{
+    if( F_FW_Version_Display_Mode == CLEAR )
+    {
+        init_filter();
+        return;
+    }
+    else{}
+
+    if( bit_self_test_start == SET )
+    {
+        return;
+    }
+    else{}
+
+	if(u8FactoryTestMode == DISPLAY_TEST_MODE)
+	{
+		if(bit_filter_reed == SET)
+		{
+			return;
+		}
+	}
+
+	/* 2KG의 필터 리드스위치는 프론트가 아닌 메인에 연결되어 있음 250219 CH.PARK */
+	gu8_front_rcv_filter_reed_data = pREED_FILTER;
+	
+	/* 필터 리드스위치 [열림] */
+	if(gu8_front_rcv_filter_reed_data == SET)
+	{
+		gu8_filter_reed_off_decision_cnt = 0;
+		gu8_filter_reed_on_decision_cnt++;
+
+		if ( gu8_filter_reed_on_decision_cnt >= FILTER_REED_DETECT_TIME )
+		{
+			gu8_filter_reed_on_decision_cnt = FILTER_REED_DETECT_TIME;
+
+			if( bit_filter_reed == SET )
+			{			
+				/*..hui [21-8-3오후 12:49:03] 열림..*/
+				bit_filter_reed = CLEAR;
+				power_saving_init();
+				play_voice_filter_reed_sw_open_4();
+
+				/* 추출중이었다면 추출 즉시 중지 */
+				if(F_WaterOut == SET)
+				{
+					F_WaterOut = CLEAR;
+					u8Extract_Continue = CLEAR;
+				}
+				else {  }
+
+				if(F_IceOut == SET)
+				{
+					ice_extraction_finish();
+
+					// F_IceOut = CLEAR;
+					// F_IceOutCCW = CLEAR;
+					// F_IceBreak_Motor_Out = CLEAR;
+				}
+				else {  }
+
+				/* 필터리드 및 필터커버 OPEN 시 동시 추출 관련된 데이터 클리어 250730 CH.PARK */
+				Extract_Stack.U8_iceSelect = CLEAR;
+				Extract_Stack.U8_waterSelect = CLEAR;
+			}
+			else{}
+		}
+	}
+	else
+	{
+		gu8_filter_reed_on_decision_cnt = 0;
+		gu8_filter_reed_off_decision_cnt++;
+
+		if( gu8_filter_reed_off_decision_cnt >= FILTER_REED_DETECT_TIME )
+		{
+			gu8_filter_reed_off_decision_cnt = FILTER_REED_DETECT_TIME;
+		
+			/* 필터 리드스위치 [닫힘] */
+			if( bit_filter_reed == CLEAR )
+			{
+				bit_filter_reed = SET;
+
+				play_melody_setting_on_198();
+			}
+			else{}
+		}
+	}
+}
+
+/******************************************************************************************************/
+/**
+ * @brief 필터커버 열림 감지
+ * 
+ */
+void	input_filter_cover_sw(void)
+{
+	if( F_FW_Version_Display_Mode == CLEAR )
+    {
+        init_filter();
+        return;
+    }
+    else{}
+
+    if( bit_self_test_start == SET )
+    {
+        return;
+    }
+    else{}
+
+	if(u8FactoryTestMode == DISPLAY_TEST_MODE)
+	{
+		if(bit_filter_cover == SET)
+		{
+			return;
+		}
+	}
+
+	/* 2KG의 필터 리드스위치는 프론트가 아닌 메인에 연결되어 있음 250219 CH.PARK */
+	gu8_filter_cover_reed_data = pREED_FILTER_COVER;
+	
+	/* 필터 리드스위치 [열림] */
+	if(gu8_filter_cover_reed_data == SET)
+	{
+		gu8_filter_cover_reed_off_decision_cnt = 0;
+		gu8_filter_cover_reed_on_decision_cnt++;
+
+		if ( gu8_filter_cover_reed_on_decision_cnt >= FILTER_REED_DETECT_TIME )
+		{
+			gu8_filter_cover_reed_on_decision_cnt = FILTER_REED_DETECT_TIME;
+
+			if( bit_filter_cover == SET )
+			{
+				/*..hui [21-8-3오후 12:49:03] 열림..*/
+				bit_filter_cover = CLEAR;
+
+				/* 추출중이었다면 추출 즉시 중지 */
+				if(F_WaterOut == SET)
+				{
+					F_WaterOut = CLEAR;
+					u8Extract_Continue = CLEAR;
+				}
+				else {  }
+
+				if(F_IceOut == SET)
+				{
+					ice_extraction_finish();
+					// F_IceOut = CLEAR;
+					// F_IceOutCCW = CLEAR;
+					// F_IceBreak_Motor_Out = CLEAR;
+				}
+				else {  }
+
+				/* 필터리드 및 필터커버 OPEN 시 동시 추출 관련된 데이터 클리어 250730 CH.PARK */
+				Extract_Stack.U8_iceSelect = CLEAR;
+				Extract_Stack.U8_waterSelect = CLEAR;
+
+				play_voice_filter_cover_open_3();
+			}
+			else{}
+		}
+	}
+	else
+	{
+		gu8_filter_cover_reed_on_decision_cnt = 0;
+		gu8_filter_cover_reed_off_decision_cnt++;
+
+		if( gu8_filter_cover_reed_off_decision_cnt >= FILTER_REED_DETECT_TIME )
+		{
+			gu8_filter_cover_reed_off_decision_cnt = FILTER_REED_DETECT_TIME;
+		
+			/* 필터 리드스위치 [닫힘] */
+			if( bit_filter_cover == CLEAR )
+			{
+				bit_filter_cover = SET;
+
+				/* 필터리드 스위치는 열려있으면 "필터가 올바르게 결합되지 않은 것으로 감지되었습니다..." */
+				if(bit_filter_reed == CLEAR)
+				{
+					play_voice_filter_not_detected_14();
+				}
+				else
+				{
+					play_melody_setting_on_198();
+
+					/*..hui [24-1-17오후 5:01:07] 최초 필터 플러싱 시작 전에만.. 필터 관련 음성 출력..*/
+					/*..hui [24-1-17오후 5:01:25] 1,3번으로 필터 플러싱 중에 커버 열어서 중단하고 2번 교체 감지가 되면..*/
+					/*..hui [24-1-17오후 5:01:41] 닫았을때 필터 음성은 안내보내고 플러싱 시간만 ro 플러싱 30분으로 변경한다..*/
+					/* 필터가 제대로 닫혀 있을 때에만 필터교체 관련된 팝업을 띄우게 한다 250515 CH.PARK */
+					if( gu8_filter_flushing_state == FILTER_FLUSHING_NONE )
+					{
+						bit_filter_cover_open_to_close = SET;
+					}
+					else
+					{
+
+					}
+				}
+			}
+			else{}
+		}
+	}
+}
+
+/**
+ * @brief 필터 OPEN/CLOSE 상태 확인 함수
+ */
+void input_filter_all(void)
+{
+	if((bit_filter_cover == CLEAR)
+	|| (bit_filter_reed == CLEAR)
+	)
+	{
+		bit_filter_all = CLEAR;
+	}
+	else
+	{
+		bit_filter_all = SET;
+	}
+
+	/* 필터 관련된 거 하나라도 열리면 즉시 플러싱 일시정지 */
+	if(bit_filter_all == CLEAR)
+	{
+		if(gu8_flushing_mode > FLUSHING_STANDBY_STATE)
+		{
+			gu8_flushing_mode_saved = gu8_flushing_mode;
+			gu8_flushing_mode = FLUSHING_STANDBY_STATE;
+
+			bit_flushing_halt = SET;
+		}
+		else {  }
+	}
+	else {  }
+}
+
+void filter_reset_timer__ino(void)
+{
+	/*..hui [23-12-19오후 3:13:15] 설치 플러싱일때는 확인하지 않는다..*/
+    if( bit_install_flushing_state == SET )
+    {
+        return;
+    }
+    else{}
+
+	if( bit_filter_reed == CLEAR )
+    {
+        bit_filter_reed_old = SET;
+    }
+    else
+    {
+        if( bit_filter_reed_old == SET )
+        {
+			bit_filter_reed_old = CLEAR;
+			Bit2_Ino_Filter_3_Reset_State = SET;
+
+			if( u8FilterResetState == NEO_INO_FILTER_CHANGE )
+			{
+				// 필터를 교체했다면 물 추출 버튼을 눌러주세요
+				play_voice_1_3_filter_change_detect_18();
+			}
+			else{}
+        }
+        else{}
+    }
+
+    gu16_filter_reset_timer_sec++;
+    if(gu16_filter_reset_timer_sec >= 600)
+    {
+        gu16_filter_reset_timer_sec = 0;
+        gu8_neo_filter_reset_timer_min++;
+    }
+    else{}
+
+	/* 1시간마다 필터교체주지 카운트 */
+    if(gu8_filter_reset_timer_min >= 60)
+    {
+        gu8_filter_reset_timer_min = 0;
+        gu16_reset_day_filter++;
+    }
+    else{}
+
+	/* 필터 교체주기 : 456일 */
+    if( gu16_reset_day_filter >= FILTER_RESET_456_DAY )
+    {
+        gu16_reset_day_filter = FILTER_RESET_456_DAY;
+    }
+    else{}
+}
+
+/**
+ * @brief 필터플러싱 재진행 감지
+ */
+void decesion_filter_flushing(void)
+{
+	if( bit_filter_cover == SET )
+    {
+        if( u8FilterResetState > 0 )
+        {
+            gu16_filter_change_reset_timer++;
+            /*..hui [24-1-3오후 4:01:19] 15분으로 변경.. 강제 플러싱 기능과 동일하게 가져가기위해..*/
+            /*..hui [24-1-3오후 4:01:38] 함재진, 이제호와 협의 및 확정..*/
+            if( gu16_filter_change_reset_timer >= FILTER_CHANGE_RESET_TIME )
+            {
+                gu16_filter_change_reset_timer = 0;
+                u8FilterResetState = 0;
+            }
+            else{}
+        }
+        else
+        {
+            gu16_filter_change_reset_timer = 0;
+        }
+    }
+    else
+    {
+        gu16_filter_change_reset_timer = 0;
+    }
+
+	if( bit_filter_cover_open_to_close == SET )
+    {
+        /*..hui [23-12-11오후 5:42:14] 필터커버 OPEN->CLOSE했을때.. 필터 리드스위치가 정상 감지됐을때만..*/
+		if( u8FilterResetState == NEO_INO_FILTER_CHANGE )
+		{
+			bit_filter_cover_open_to_close = CLEAR;
+			start_filter_flushing();
+			
+			/* 필터를 교체하셨나요? 교체하셨다면 물 추출버튼을 눌러주세요. .. 250515 CH.PARK */
+			play_voice_1_3_filter_change_finish_19();
+		}
+		else
+		{
+			// /*..hui [23-12-6오후 2:22:33] 1,3번 교체차례인데 1,2,3이 감지가되도 플러싱 진행..*/
+			// /*..hui [23-12-6오후 2:22:40] 단, 리셋은 1,3번만 한다..*/
+			// start_filter_flushing();
+		}
+	}
+}
+
+/**
+ * @brief 필터플러싱 재진행 함수
+ */
+void start_filter_flushing(void)
+{
+	gu8_flushing_mode = FLUSHING_STANDBY_STATE;
+	
+    /*..hui [23-6-14오후 6:44:36] 필터 플러싱 한번 시작하면 취소 안되게..*/
+    /*..hui [23-6-14오후 6:44:55] 이후에 다시 커버 열렸다 닫혀도 yes no 표시 안함..*/
+    /*if( gu8_filter_flushing_state == FILTER_FLUSHING_NONE )*/
+
+    /*..hui [23-9-1오전 9:44:25] 필터플러싱 모드도 아니고, 설치플러싱도 아닐때..*/
+    /*..hui [23-9-1오전 9:44:44] 설치플러싱 => 사이드커버 열림 => 사이드커버 닫힘 => 취소 => 메인화면으로 돌아감..*/
+    if( (gu8_filter_flushing_state == FILTER_FLUSHING_NONE) 
+	&& (bit_install_flushing_state == CLEAR)
+	)
+    {
+        bit_yes_no_popup = SET;
+
+        /*..hui [24-1-11오전 10:48:12] 여기서도 초기화.. 설치 플러싱 종료 = 100% = 필터플러싱 바로 시작하면 100%로 시작됨..*/
+        gu8_display_flushing_total_percent = 0;
+    }
+    else {  }
+}
+
+/**
+ * @brief 교체플러싱 취소
+ */
+void cancel_filter_flushing(void)
+{
+    play_voice_filter_flushing_cancle_25();
+    gu8_filter_flushing_state = FILTER_FLUSHING_NONE;
+    gu8_flushing_mode = FLUSHING_NONE_STATE;
+
+    if( bit_yes_no_popup == SET )
+    {
+        bit_yes_no_popup = CLEAR;
+        bit_filter_reset_yes = CLEAR;
+        bit_filter_reset_no = SET;
+    }
+    else{}
+}
+
+/**
+ * @brief 필터 관련 데이터 초기화 함수
+ */
+void init_filter(void)
+{
+	gu8_filter_cover_reed_on_decision_cnt = 0;
+	gu8_filter_cover_reed_off_decision_cnt = 0;
+	bit_filter_cover = SET;
+
+	gu8_filter_reed_on_decision_cnt = 0;
+	gu8_filter_reed_off_decision_cnt = 0;
+	bit_filter_reed = SET;
+}
+
+/**
+ * @brief 필터 교체 시 사용량 관련된 데이터 초기화
+ */
+void filter_reset(void)
+{
+	if(bit_filter_reset_yes == SET)
+	{
+		bit_filter_reset_yes = CLEAR;
+	}
+	else if( bit_filter_reset_no == SET )
+    {
+        bit_filter_reset_no = CLEAR;
+        u8FilterResetState = FILTER_NO_CHANGE;
+        return;
+    }
+	else
+	{
+		return;
+	}
+	
+	if( u8FilterResetState == NEO_INO_FILTER_CHANGE )
+	{
+		reset_time_ino_filter();		/* 필터사용량 초기화 */
+		// send_wifi_system_function();
+	}
+	else
+	{
+
+	}
+}
+
+/**
+ * @brief 필터교체 발생 시 관련된 데이터 초기화
+ */
+void reset_time_ino_filter(void)
+{
+	if(Bit2_Ino_Filter_3_Reset_State == SET)
+	{
+		Bit2_Ino_Filter_3_Reset_State = CLEAR;
+
+		gu16_filter_reset_timer_sec = 0;
+		gu8_filter_reset_timer_min = 0;
+		gu16_reset_day_filter = 0;
+
+		gu16_water_usage_ino_filter = 0;
+
+        gu16_temporary_save_usage = 0;
+
+		bit_wifi_ino_filter_3_reset = SET;
+	}
+	else
+	{
+
+	}
+}
+
+/**
+ * @brief 필터입력 관련된 함수 모음
+ */
+void input_filter(void)
+{
+	if( F_FW_Version_Display_Mode == CLEAR )
+    {
+        init_filter();
+        return;
+    }
+    else{}
+
+    if( bit_self_test_start == SET )
+    {
+        return;
+    }
+    else{}
+
+	/*..hui [19-10-23오후 7:56:31] 탱크 커버 리드스위치 ..*/
+    service_reed_sw_input();
+
+    /*..hui [20-2-19오후 5:57:55] UV 차단용 탱크 커버 리드스위치 따로 분리..*/
+    /*..hui [20-2-19오후 5:58:13] 탱크 커버 열었을때 즉시 UV 차단하기 위해 분리함..*/
+    uv_tank_reed_sw_input();
+
+    /*..hui [21-8-25오후 5:29:54] 펄터 개별 리드스위치..*/
+    input_filter_reed_sw();
+    
+    /* 필터커버 리드스위치 감지 250219 CH.PARK */
+    input_filter_cover_sw();     // 제대로 된 샘플 오면 그때 주석 제거
+
+    /* 필터 상태 확인 250421 CH.PARK */
+    input_filter_all();
+
+    /* 필터교체주기 계산 */
+    filter_reset_timer__ino();
+
+    /* 필터교체 확인 */
+    decesion_filter_flushing();
+
+	/* 필터교체 시 사용량 데이터 초기화 */
+	filter_reset();
+
+	// if(bit_filter_cover == CLEAR && bit_filter_reed == CLEAR)
+	// {
+	// 	bit_filter_flushing_check = SET;
+	// }
+
+	// if(bit_filter_flushing_check == SET)
+	// {
+	// 	if(bit_filter_cover == SET && bit_filter_reed == SET)
+	// 	{
+	// 		bit_filter_flushing_check = CLEAR;
+	// 		gu8_filter_flushing_state = SET;
+	// 		gu8_flushing_mode = FLUSHING_STANDBY_STATE;
+	// 	}
+	// }
+}
+
+

@@ -1,0 +1,307 @@
+/***********************************************************************************************************************
+* Version      : BAS25(STEP_UP)
+* File Name    : System_init.c
+* Device(s)    : R5F100MG
+* Creation Date: 2015/07/31
+* Copyright    : Coway_Electronics Engineering Team (DH,Kim)
+* Description  :
+***********************************************************************************************************************/
+#include    "Macrodriver.h"
+#include    "Global_Variable.h"
+#include    "Port_Define.h"
+#include    "M0_System_init.h"
+#include    "model_select.h"
+/////#include "Wifi/WifiUser/Western_ICE/WIFI_MonitorFixRAM.h"
+
+
+void System_ini(void);
+void Ram_Init(void);
+void Variable_Init(void);
+void system_reset(void);
+
+
+bit F_PowerOn;
+
+bit F_System_Init_Finish;
+extern ICETRAY_STATE icetray_state_current;
+extern ICETRAY_STATE icetray_state_target;
+extern bit F_First_Hot_Effluent;
+extern void run_init_flow(void);
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void System_ini(void)
+{
+    DI();
+
+    /*..hui [21-9-8ï¿½ï¿½ï¿½ï¿½ 1:57:51] FOTA ï¿½ï¿½ï¿½ï¿½.. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ìµï¿½..*/
+    R_Systeminit();
+
+    Ram_Init();
+
+    //ADC_Start();
+
+    R_TAU0_Channel0_Start();   /* timer 250us */
+
+    R_TAU0_Channel1_Start();   /* triac timer 8333us */
+    R_TAU0_Channel2_Start();   /* timer 500us */
+
+    /*R_TAU1_Channel0_Start();*/   /* multi masetr pwm - drain / hot pump */
+    R_TAU1_Channel2_Start(); /* master pwm - drain pump */
+
+    R_UART0_Start();           /* Front */
+    R_UART1_Start();           /* Wifi */
+    R_UART2_Start();           /* BLDC Comp */
+    R_UART3_Start();           /* Line Test, Pc */
+
+    /*..hui [24-11-13ï¿½ï¿½ï¿½ï¿½ 4:36:12] TDS ï¿½ï¿½ï¿½ï¿½..*/
+    /*R_INTC4_Start();*/           /* TDS In */
+    /*R_INTC7_Start();*/           /* Flow Sensor - Filter */
+    R_INTC11_Start();          /* Flow Sensor */
+
+    EI();
+
+    Variable_Init();
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void Ram_Init(void)
+{
+    /* ram initialize */
+    U32 ram_addr = 0;
+    U8 *p_ram_addr = 0;
+
+    #if 0
+    for(ram_addr = 0xFCF00; ram_addr < 0xFFE00; ram_addr++)
+    {
+        p_ram_addr = (U8 *)ram_addr;
+        *p_ram_addr = 0;
+    }
+    #endif
+
+    #if 0
+    /*..hui [24-7-17ï¿½ï¿½ï¿½ï¿½ 7:51:49] 100SH..*/
+    for(ram_addr = 0xFBF00; ram_addr < 0xFFE00; ram_addr++)
+    {
+        p_ram_addr = (U8 *)ram_addr;
+        *p_ram_addr = 0;
+    }
+    #endif
+
+    for(ram_addr = 0xFAF00; ram_addr < 0xFFE00; ram_addr++)
+    {
+        p_ram_addr = (U8 *)ram_addr;
+        *p_ram_addr = 0;
+    }
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void Variable_Init(void)
+{
+    /*Delay_MS( 500 );*/
+    /*EEPROM_PRIMARY();*/
+
+    /*Delay_MS( 500 );*/
+
+    Delay_MS( 1000 );
+
+    InitRtc();
+
+    Delay_MS( 50 );
+
+    WifiControlProcess(WIFI_TIME_INI);      ////////////////////////////////
+
+    EEPROM_PRIMARY();
+
+    WifiControlProcess(WIFI_TIME_SET);      ////////////////////////////////
+
+    gu16_IceSelect_StepMotor = STEP_ANGLE_SELECT;       // INNER DOOR CLOSE
+    gu16_Ice_Door_StepMotor = STEP_ANGLE_DOOR;          // ICE DOOR CLOSE
+    gu16CompOffDelay = COMP_START_TIME;                 // COMP STABLE TIME
+
+    F_Safety_Routine = 0;
+    gu8_IceHeaterControl = 0;
+    //F_TrayMotorUP = 0;                                // Tray ï¿½ï¿½ï¿½ï¿½
+    //F_TrayMotorDOWN = 0;                               //
+    F_IceInit = 1;                                    // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    F_IR = SET;                                       // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+    F_Low_IR = SET;
+
+    InitGasSwitch();
+
+    /*..hui [19-8-1ï¿½ï¿½ï¿½ï¿½ 8:49:18] ï¿½ï¿½ï¿½ï¿½Æ® ï¿½ï¿½ï¿? ï¿½ï¿½ï¿½ï¿½..*/
+    F_Front_Tx_Request = SET;
+
+    /*gu8_test_mode_timeout_1s = 30;*/
+    gu8_test_mode_timeout_1s = 60;
+    u8FactoryTestMode = NONE_TEST_MODE;
+
+    off_all_control_led();
+
+    init_before_save_data();
+
+    /*..hui [23-2-15ï¿½ï¿½ï¿½ï¿½ 11:10:25] ï¿½ï¿½È¯ï¿½ï¿½ï¿½ï¿½ï¿? ï¿½ï¿½ï¿½ï¿½Æ® ON..*/
+    F_Circul_Drain = SET;
+
+    bit_first_drain = SET;
+    run_init_flow();
+
+
+    gu8_animation_time = BREATH_ANIMATION_TIME;
+    gu8_animation_duty = BREATH_ANIMATION_DUTY;
+
+    u32ControlErrors = 0;
+
+    gu8_altutude_setting_timeout = 30;
+
+    gu8_uart_test_mode = NON_UART_TEST;
+    bit_manual_test_start = CLEAR;
+
+    bit_temporary_no_operation = CLEAR;
+
+    gu8_wifi_water_select = u8WaterOutState;
+    u8IceOutState = ICE_SELECT__NONE;
+
+    gu8_durable_test_start = CLEAR;
+
+    /*..hui [23-11-8ï¿½ï¿½ï¿½ï¿½ 3:48:54] ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã´ï¿½ï¿½ OFFï¿½ï¿½ï¿? ï¿½ï¿½ï¿½ï¿½..*/
+    bit_periodic_ster_enable = SET;
+
+
+    bit_self_test_start = CLEAR;
+
+    initial_self_data();
+    /////init_self_test_auto();
+
+    gu16_wifi_hot_target_time_min = 0;
+
+    /* ¾óÀ½·® µðÆúÆ® ¼³Á¤ */
+    gu8_ice_amount_step = ICE_LEVEL_1_STEP;
+
+    Voice_Initialize();
+
+    /*..hui [24-11-28ï¿½ï¿½ï¿½ï¿½ 9:47:30] UV ï¿½ï¿½ï¿½ï¿½ ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½..*/
+    bit_uv_fault_test_start = SET;
+
+    gu8_hk16_bright = DIMMING_SET_DEFAULT;
+
+    F_First_Hot_Effluent = SET;
+	icetray_state_target = ICETRAY_STATE_ICETHROW;
+
+    init_ice_ster();
+
+    // U16HotTemplSelect = HOT_TEMP_SELECT_DEFAULT_45_70_85_100;
+
+	gu8_hot_default_temp = HOT_SET_TEMP____100oC ;
+
+    my_setting[MY_INDEX_RAMEN].temp = 100;
+    my_setting[MY_INDEX_RAMEN].amount = 550;
+    my_setting[MY_INDEX_RAMEN].use = 1;
+
+    my_setting[MY_INDEX_DRIPCOFFEE].temp = 100;
+    my_setting[MY_INDEX_DRIPCOFFEE].amount = 160;
+    my_setting[MY_INDEX_DRIPCOFFEE].use = 1;
+
+    my_setting[MY_INDEX_TEA].temp = 100;
+    my_setting[MY_INDEX_TEA].amount = 90;
+    my_setting[MY_INDEX_TEA].use = 1;
+
+    #ifdef __DUMMY_PROGRAM__
+    my_setting[MY_INDEX_MY1].temp = 100;
+    my_setting[MY_INDEX_MY1].amount = 380;
+    my_setting[MY_INDEX_MY1].use = 1;
+
+    my_setting[MY_INDEX_MY2].temp = 6;
+    my_setting[MY_INDEX_MY2].amount = 620;
+    my_setting[MY_INDEX_MY2].use = 1;
+
+    my_setting[MY_INDEX_MY3].temp = 100;
+    my_setting[MY_INDEX_MY3].amount = 90;
+    my_setting[MY_INDEX_MY3].use = 1;
+    #endif
+
+    // ÁÂ¿ìÃø FND ¹à±â
+    left_normal_state_percent = DIMMING_FND_LEFT_NORMAL_STATE;
+    right_normal_state_percent = DIMMING_FND_RIGHT_NORMAL_STATE;
+
+    // ¼³Á¤¸ðµå ½Ã ¹à±â (±â´ÉºÎ, ÇÏ´Ü ¼³Á¤ºÎ)
+    setting_mode_function_main_percent = DIMMING_SETTING_MODE_FUNCTION_STATE_MAIN;      // ¹Ì»ç¿ë
+    setting_mode_function_extra_percent = DIMMING_SETTING_MODE_FUNCTION_STATE_EXTRA;
+
+    // ±â´ÉºÎ (¾óÀ½¹° ~ MY) ÀÏ¹Ý»óÅÂ ¹à±â
+    funtion_led_percent = DIMMING_FUNTION_LED_STATE;
+
+    // ¼³Á¤¸ðµå (ÀÚ¹°¼è, ¾óÀ½Å©±â µî)
+    setting_led_percent = DIMMING_SETTING_LED_STATE;
+
+    // ¿ìÃø ¹° ÃßÃâºÎ ¹à±â
+    water_extract_led_percent = DIMMING_EXTRACT_LED_STATE;
+
+    // ÁÂÃø ¾óÀ½ ÃßÃâºÎ ¹à±â
+    ice_extract_outer_led_percent = DIMMING_ICE_EXTRACT_OUTER_LED_STATE;
+    ice_extract_inner_led_percent = DIMMING_ICE_EXTRACT_INNER_LED_STATE;
+
+    // ¼³Á¤ BAR ¹à±â
+    bar_led_percent = DIMMING_BAR_LED_STATE;
+
+    // ¸¶ÀÌ¿öÅÍ °ü·Ã ¹à±â
+    receipe_led_percent = DIMMING_RECEIPE_LED_STATE;
+
+    // °í¿Â»ì±Õ, UV»ì±Õ (Å« ±Û²Ã) °ü·Ã ¹à±â
+    big_ster_led_percent = DIMMING_BIG_STER_LED_STATE;
+
+    // UV (ÀÛÀº ±Û²Ã) °ü·Ã ¹à±â
+    small_ster_led_percent = DIMMING_SMALL_STER_LED_STATE;
+
+    // µå¸³Ä¿ÇÇ ¹à±â
+    receipe_led_dripcoffee_percent = DIMMING_RECEIPE_LED_DRIPCOFFEE_STATE;
+
+    // [¾óÀ½Àá±Ý], [ÀüÃ¼Àá±Ý] Ç¥½Ã
+    setting_led_side_percent = DIMMING_SETTING_LED_SIDE_STATE;
+
+    // [ÃëÄ§¸ðµå ¾ÆÀÌÄÜ], [:], [¾óÀ½ºÎÁ·,°¡µæ], [WIFI] µî
+    top_small_led_percent = DIMMING_TOP_SMALL_LED_STATE;
+
+    // ['C] ¾ÆÀÌÄÜ
+    middle_small_led_percent = DIMMING_MIDDLE_SMALL_LED_STATE;
+
+    colon_dot_led_percent = DIMMING_COLON_SEG_DOT_STATE;
+
+    welcome_left_led_percent = DIMMING_WELCOME_LEFT_STATE;
+    welcome_right_led_percent = DIMMING_WELCOME_RIGHT_STATE;
+
+    ice_type_led_percent = DIMMING_ICE_TYPE_STATE;
+
+    #ifdef _DISPLAY_FCT_SUB_LINE_
+    u8FactoryTestMode = DISPLAY_TEST_MODE;
+    // diplay_test_start();
+    #endif
+
+    /* 2025-10-28 CH.PARK ¸®µå½ºÀ§Ä¡ Ãß°¡ ¸ðµ¨ÆÇ´Ü */
+    ModelInit();
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void system_reset(void)
+{
+    DI();
+
+    while(1)
+    {
+        ;
+    }
+}
+
+
+
+

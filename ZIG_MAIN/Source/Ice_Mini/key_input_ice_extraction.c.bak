@@ -1,0 +1,824 @@
+/***********************************************************************************************************************
+* Version      : BAS25(STEP_UP)
+* File Name    : Main.c
+* Device(s)    : R5F100MG
+* Creation Date: 2015/07/31
+* Copyright    : Coway_Electronics Engineering Team (DH,Kim)
+* Description  :
+***********************************************************************************************************************/
+#include    "Macrodriver.h"
+#include    "Global_Variable.h"
+#include    "Port_Define.h"
+#include    "key_input_ice_extraction.h"
+/*************************************************************************************************************************/
+void key_input_ice_extract(void);
+void input_ice_extract_key(void);
+void ice_ext_button_operation(void);
+void ice_extraction_start(void);
+void ice_extraction_finish(void);
+void ice_extract_key(void);
+void ice_extract_key_management(void);
+void Uart_Test_Mode_Ice_Extract_Key_Short_Input(void);
+void Display_Test_Mode_Ice_Extract_Key_Short_Input(void);
+/*************************************************************************************************************************/
+/* 얼음, 얼음물 추출 관련된 키 변수 */
+U8  gu8_Key_Ice_Or_Water_Extract;
+U8  u8_Ice_Or_Water_Extract_Key_Buffer;
+U8  u8_Ice_Or_Water_Extract_Key_Input_Value;
+bit F_Ice_Or_Water__Key_Short_Push_State;
+
+U8 gu8_Icewater_level;
+
+bit F_Ice_Or_Water__Key_Long_Push_State;
+bit F_Ice_Or_Water__Key_Very_Long_Push_State;
+U16  u16_Ice_Or_Water__Key_Sampling_Counter;
+U16  u16_Ice_Or_Water__Key_Long_Counter;
+U16  u16_Ice_Or_Water__Key_Short_Counter;
+/*************************************************************************************************************************/
+U16 gu16_ice_ext_on_decision_timer;
+U16 gu16_ice_ext_off_decision_timer;
+/*************************************************************************************************************************/
+U8 gu8_Key_Ice_Extract;
+bit F_Key_IceExtraction;
+/*************************************************************************************************************************/
+U8 gu8_ice_out_continue;
+extern U16 gu16_extract_display_hz;
+/*************************************************************************************************************************/
+bit bit_ice_water_extract;
+U8  gu8_ice_water_ext_start_timer_100ms;
+/*************************************************************************************************************************/
+extern bit F_Effluent_OK;
+extern U16 gu16_extract_display_hz;
+extern U8 gu8_cup_led_select;
+extern U8 gu8_cup_led_off_time;
+extern U8 gu8_dripcoffee_percent;
+extern U16 drip_timer;
+extern MODEL model;
+extern ICE_STUCK_1 IceStuck;
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+#if 1
+void key_input_ice_extract(void)
+{
+    input_ice_extract_key();
+    ice_extract_key_management();
+}
+#endif
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+#if 1
+void input_ice_extract_key(void)
+{
+    if(gu8_Key_Ice_Extract == u8_Ice_Or_Water_Extract_Key_Buffer)
+    {
+        if(u8_Ice_Or_Water_Extract_Key_Buffer == UKey_Mask)
+        {
+            u16_Ice_Or_Water__Key_Sampling_Counter = 0;
+            F_Ice_Or_Water__Key_Short_Push_State = CLEAR;
+            F_Ice_Or_Water__Key_Long_Push_State = CLEAR;
+            F_Ice_Or_Water__Key_Very_Long_Push_State = CLEAR;
+        }
+        else
+        {
+            u16_Ice_Or_Water__Key_Sampling_Counter++;
+        }
+
+        if(u16_Ice_Or_Water__Key_Sampling_Counter >= 1)
+        {
+            u16_Ice_Or_Water__Key_Short_Counter = u16_Ice_Or_Water__Key_Sampling_Counter;
+            u16_Ice_Or_Water__Key_Long_Counter++;
+
+            /*..hui [19-11-19오후 4:26:26] 키 눌려있는동안 온수 복귀 카운터 초기화..*/
+            /*gu16_water_select_return_time = 0;*/
+        }
+        else{}
+    }
+    else
+    {
+        u8_Ice_Or_Water_Extract_Key_Buffer = gu8_Key_Ice_Extract;
+
+        u16_Ice_Or_Water__Key_Sampling_Counter = 0;
+        u16_Ice_Or_Water__Key_Long_Counter = 0;
+        u16_Ice_Or_Water__Key_Short_Counter = 0;
+    }
+}
+#endif
+
+void ice_extract_key_management(void)
+{
+    if(F_Ice_Or_Water__Key_Short_Push_State == CLEAR)
+    {
+        if((u16_Ice_Or_Water__Key_Short_Counter >= 1)
+        && (u16_Ice_Or_Water__Key_Short_Counter < 2000)
+        )
+        {
+            if(u8FactoryTestMode == NONE_TEST_MODE)
+            {
+                ice_extraction_start();
+            }
+            else if (u8FactoryTestMode == DISPLAY_TEST_MODE)         /* 프론트 TEST MODE */
+            {
+                Display_Test_Mode_Ice_Extract_Key_Short_Input();
+            }
+            else if (u8FactoryTestMode == UART_TEST_MODE)               /* 공정검사모드 */
+            {
+                Uart_Test_Mode_Ice_Extract_Key_Short_Input();
+            }
+            else if(u8FactoryTestMode == PCB_TEST_MODE)                 /* PCB 테스트모드 */
+			{
+				PCB_Test_Mode_Ice_Extract_Key_Short_Input();
+			}
+
+            F_Ice_Or_Water__Key_Short_Push_State = SET;
+            u16_Ice_Or_Water__Key_Short_Counter = 0;
+        }
+        else
+        {
+            /* 누름추출은 조건에 상관없이 떼면 즉시 중단 250716 CH.PARK */
+            if( F_IceOut == SET && gu8_ice_out_continue == SET )
+            {
+                ice_extraction_finish();
+            }
+            else{}
+        }
+    }
+    else
+    {
+        if(F_Ice_Or_Water__Key_Long_Push_State == CLEAR)
+        {
+            if( u16_Ice_Or_Water__Key_Short_Counter >= 2000 )
+            {
+                F_Ice_Or_Water__Key_Long_Push_State = SET;
+
+                if(u8FactoryTestMode == NONE_TEST_MODE)
+                {
+                    ice_extract_long_key();
+                }
+                else{}
+            }
+            else{}
+        }
+        else{}
+    }
+}
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+#if 0
+void ice_ext_button_operation(void)
+{
+    if(F_FW_Version_Display_Mode != SET)
+    {
+        return;
+    }
+    else{}
+
+    #if 0
+    /*..hui [23-2-9오후 2:03:49] 세팅모드에서는 부저음없이 추출안됨..*/
+    if( bit_setting_mode_start == SET )
+    {
+        return;
+    }
+    else{}
+
+    /*..hui [23-8-2오후 1:20:19] 얼음 추출중 필터 도어 열림시 얼음추출도 정지..*/
+    /*..hui [23-8-2오후 1:20:39] 굳이 정지할 필요는 없지만.. 필터 열렸을때 얼음 추출 막았으므로 동일하게 하기 위해서....*/
+    if( bit_filter_all == CLEAR )
+    {
+        if( F_IceOut == SET )
+        {
+            F_Key_IceExtraction = CLEAR;
+        }
+        else{}
+    }
+    else{}
+    #endif
+
+    if( F_Key_IceExtraction == SET )
+    {
+        if( F_ExtractKeySet == CLEAR )
+        {
+            if( F_All_Lock == SET )
+            {
+                //////////start_all_lock_flick();
+                play_voice_all_lock_select_103();
+            }
+            else
+            {
+                ice_extraction_start();
+            }
+
+            F_ExtractKeySet = SET;
+        }
+        else
+        {
+            /*..hui [25-1-9오후 7:19:50] 정량추출 중간에 정지?..*/
+            ice_extraction_finish();
+        }
+    }
+    else
+    {
+        ice_extraction_finish();
+        F_ExtractKeySet = CLEAR;
+    }
+}
+#endif
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void ice_extraction_start(void)
+{
+    #if 1
+    gu8_clear_block_error = SET;
+
+    if(F_FW_Version_Display_Mode != SET)
+    {
+        return;
+    }
+    else {  }
+
+    /* 플러싱+코디 설명모드 아닐 때에는 그냥 아무소리없이 입력 안되게 막음 */
+    if( gu8_flushing_mode > FLUSHING_NONE_STATE && bit_instruction_mode_start == CLEAR )
+    {
+        return;
+    }
+    else {  }
+
+    /* 필터커버 감지 시 추출불가 */
+    if(bit_filter_cover == CLEAR)
+    {
+        play_voice_filter_cover_opened_44();
+        return;
+    }
+
+    if(bit_filter_all == CLEAR)
+    {
+        play_voice_filter_not_detected_14();
+        return;
+    }
+
+    if( F_All_Lock == SET )
+    {
+        play_voice_all_lock_select_103();
+        start_all_lock_flick();
+        return;
+    }
+
+    /* 포타할 때는 소리나면 안됨! */
+    if( gu8_fota_start == SET )
+    {
+        return;
+    }
+    else{}
+
+    if( bit_setting_mode_start == SET )
+    {
+        return;
+    }
+    else{}
+
+    if( bit_self_test_start == SET )
+    {
+        play_melody_warning_197();
+        return;
+    }
+    else{}
+
+    if( bit_memento_start == SET )
+    {
+        return;
+    }
+    else{}
+
+    /* 고온살균 중에는 추출안함 */
+    if(bit_ice_tank_ster_start == SET)
+    {
+        play_voice_ice_tray_hot_ster_is_going_86();
+        return;
+    }
+    else {  }
+
+    if(bit_time_setting_start == SET)
+    {
+        return;
+    }
+    #endif
+
+    if(( F_WaterOut == CLEAR )
+    && (F_IceOut == CLEAR)
+    )
+    {
+        bit_welcome_start = SET;
+    }
+    else {  }
+
+    bit_30_min_no_use_start = CLEAR;
+    gu32_no_use_30_min_timer = CLEAR;
+
+    /* 유로살균 중 추출 버튼 입력 시 즉시 중단
+    Cody Water Line Clean Service */
+    if(cody_water_line.gu8_start == SET)
+    {
+        cody_water_clean_mode_clear();
+        return;
+    }
+    else {  }
+
+    /* 얼음, 얼음물 선택하지 않았는데 추출 버튼 누르면 무시 */
+    if((u8IceOutState == ICE_SELECT__NONE)
+    && (F_IceOut == CLEAR)
+    )
+    {
+        key_ice_select_job();
+        return;
+    }
+
+    if(bit_myWater_setting_start == SET)
+    {
+        if( F_WaterOut == SET )
+        {
+            play_melody_warning_197();
+            return;
+        }
+        else {  }
+    }
+    else {  }
+
+    if(bit_volume_setting_start == SET)
+    {
+        return;
+    }
+    else {  }
+
+    /* 고온살균 중에는 추출안함 */
+    if(bit_ice_tank_ster_start == SET)
+    {
+        play_voice_ice_tray_hot_ster_is_going_86();
+        return;
+    }
+    else {  }
+
+
+    if(F_Ice_Lock == SET)
+    {
+        play_voice_ice_lock_ice_out_98();
+        return;
+    }
+
+    if( bit_manual_drain_start == SET )
+    {
+        return;
+    }
+
+    /*..hui [25-6-2오후 1:16:55] 닥터 제품 설명 모드시 추출버튼 막음..*/
+    /* 플러싱+코디 설명모드일 때에는 그냥 경고음내면서 입력 안되게 막음 */
+    if( gu8_flushing_mode > FLUSHING_NONE_STATE && bit_instruction_mode_start == SET )
+    {
+        play_melody_warning_197();
+        return;
+    }
+    else{}
+
+    /* 순환배수 취소 */
+    auto_drain_key_off_check();
+
+    /* 페어링 중 사용자가 어떤 버튼을 누르면 바로 페어링표시는 풀린다. 250714 CH.PARK */
+    if(( gu8_Led_Display_Step == LED_Display__WIFI_PAIRING )
+    // && (gu8_Wifi_Pairing_State == )
+    )
+    {
+        //bit_wifi_pairing_start = CLEAR;
+        finish_pairing_screen();
+    }
+    else {  }
+
+    /*..sean [25-02-03] E08 에러 안되어있어서 추가..*/
+    if( Bit3_Leakage_Sensor_Error__E01 == SET )
+        //|| Bit1_Main_Water_Flow_Leaked_Error__E02 == SET
+        //|| Bit6_Main_Water_Flow_Block_Error__E09 == SET
+        //|| Bit0_Hot_Water_Flow_Block_Error__E08 == SET )
+    {
+        /*..hui [21-7-23오후 7:12:37] 최초 에러 발생했을때 제외하고 무조건 띠링띠링..*/
+        play_melody_warning_197();
+        return;
+    }
+    else{}
+
+
+    /* 얼음물에서 얼음은 추출완료 됐고, 물은 추출중일 때 */
+    if( u8IceOutState == ICE_SELECT__ICE_WATER )
+    {
+        if( (F_IceOut == SET)
+        || (F_WaterOut == SET)
+        )
+        {
+            play_melody_extract_complete_194();
+
+            F_WaterOut = CLEAR;
+            ice_extraction_finish();
+
+            gu16_extract_display_hz = 0;
+        }
+        else
+        {
+            /* 얼음물 추출 시작 */
+            F_IceOut = SET;
+            bit_ice_door_open_after_close = SET;
+
+            play_voice_ice_water_extract_92();
+
+            /* 얼음, 얼음물 추출 시 flick 표시 즉시 없앰 250624 CH.PARK */
+            stop_ice_lock_flick();
+            stop_icewater_off_flick();
+            stop_cold_off_flick();
+            stop_hot_off_flick();
+
+            /* 얼음타입 : [일반] 선택 후 동작 */
+            if(F_IceBreak == CLEAR)
+            {
+                F_IceSelect = SET;          /* 얼음셀렉트 도어 오픈 */
+                F_IceOpen = SET;            /* 얼음 1차 도어 오픈 */
+
+                /* 역회전 제어가 없으면 바로 피더 제어 */
+                if((bit_ice_out_back_1s_state == CLEAR)
+                && (bit_ice_out_back_state == CLEAR)
+                )
+                {
+                    /* 정량추출 시 정역회전 1초 추가 250926 CH.PARK */
+                    gu8_ice_feeder_shake = SET;
+                    gu8_ice_feeder_shake_time = 0;
+                }
+                else
+                {
+                    if(bit_ice_out_back_1s_state == SET)
+                    {
+                        gu8_ice_out_reverse_1s_timer = ICE_OUT_BACK_1S_DELAY_TIME;
+                    }
+                    else if(bit_ice_out_back_state == SET)
+                    {
+                        gu8_ice_out_reverse_timer = ICE_OUT_BACK_2S_DELAY_TIME;
+                    }
+                }
+
+                /*..hui [20-4-16오전 10:39:30] 역회전 동작중이었으면 취소..*/
+                // bit_ice_out_back_state = CLEAR;
+                // bit_ice_out_back_1s_state = CLEAR;
+
+                /* 아이스 도어 강제 닫힘 기능값 겹치는 경우 FULL OPEN */
+                if( gu16IceDoorCloseResetTimer  != 0 )
+                {
+                    gu16_Ice_Door_StepMotor = 0;
+                }
+                else {  }
+
+                if(gu16IceSelectDoorCloseResetTimer != 0)
+                {
+                    gu16_IceSelect_StepMotor  = 0;
+                }
+                else {  }
+            }
+            else
+            {
+                /* 얼음타입 : [조각] 선택 후 동작 */
+                /* 역회전 제어가 없으면 바로 피더 제어 */
+                if((bit_ice_out_back_1s_state == CLEAR)
+                && (bit_ice_out_back_state == CLEAR)
+                )
+                {
+
+                }
+                else
+                {
+                    if(bit_ice_out_back_1s_state == SET)
+                    {
+                        gu8_ice_out_reverse_1s_timer = ICE_OUT_BACK_1S_DELAY_TIME;
+                    }
+                    else if(bit_ice_out_back_state == SET)
+                    {
+                        gu8_ice_out_reverse_timer = ICE_OUT_BACK_2S_DELAY_TIME;
+                    }
+                }
+
+                F_IceSelect = CLEAR;          /* 얼음 1차 도어 오픈 */
+
+                /* 2025-10-02 CH.PARK 조각얼음은 추출할 때 정역회전 들어가면 안됨 */
+                gu8_ice_feeder_shake = CLEAR;
+                gu8_ice_feeder_shake_time = 0;
+
+                /* 2025-10-02 CH.PARK 기존 30%에서 100% 닫는거로 변경 */
+                if(gu16_IceSelect_StepMotor == 0)
+                {
+                    // gu16_IceSelect_StepMotor = STEP_ANGLE_TEMP_SELECT;
+                    gu16_IceSelect_StepMotor = STEP_ANGLE_SELECT;
+                    F_IceSelectClose = SET;
+                }
+                else {  }
+
+                F_IceOpen = SET;              /* 얼음 최종도어  오픈 */
+
+                /*..hui [20-4-16오전 10:39:30] 역회전 동작중이었으면 취소..*/
+                // bit_ice_out_back_state = CLEAR;
+                // bit_ice_out_back_1s_state = CLEAR;
+            }
+
+            /* 얼음 추출 시 내보낼 음성안내 */
+            /*.. sean [25-5-31] 이상이 있는 경우 후순위에 있는 음성이 출력되기 때문에 해당 내용으로 추가..*/
+            if( Bit3_Leakage_Sensor_Error__E01 == SET )
+            {
+                // play_voice_leakage_error_12();
+                play_melody_warning_197();
+                gu8_error_popup_enable = SET;
+            }
+    #if 0
+            else if( Bit17_Tray_Micro_SW_Dual_Detect_Error__E61 == SET
+            || Bit18_Tray_Micro_SW_Up_Move_Error__E62 == SET
+            || Bit19_Tray_Micro_SW_Down_Move_Error__E63 == SET
+            || Bit16_Drain_Pump_Error__E60 == SET
+            || (Bit15_Amb_Temp_Open_Short_Error__E43 == SET && Bit21_Amb_Side_Temp_Open_Short_Error__E53 == SET)
+            || Bit7_BLDC_Communication_Error__E27 == SET
+            || bit_bldc_operation_error_total == SET )
+            {
+                /*..hui [24-1-10오후 3:42:03] 얼음에러는.. 트레이에러, 드레인펌프에러, 외기센서에러, 컴프에러..*/
+                /*..hui [24-2-1오후 4:30:53] 정수 온도센서 에러도 추가..*/
+                play_voice_ice_error_10();
+            }
+    #endif
+            else if( bit_sleep_mode_start == SET )
+            {
+                play_voice_sleep_mode_ice_extract_52();
+            }
+            else {  }
+        }
+    }
+    else
+    {
+        /* 얼음일 때 */
+        if( u8IceOutState == ICE_SELECT__ICE )
+        {
+            if( F_IceOut != SET )
+            {
+                /* 얼음 추출 */
+                F_IceOut = SET;
+                bit_ice_door_open_after_close = SET;
+
+                play_melody_setting_on_198();
+
+                /* 얼음, 얼음물 추출 시 flick 표시 즉시 없앰 250624 CH.PARK */
+                stop_ice_lock_flick();
+                stop_icewater_off_flick();
+
+                /* 얼음타입 : [일반] 선택 후 동작 */
+                if(F_IceBreak == CLEAR)
+                {
+                    F_IceSelect = SET;          /* 얼음셀렉트 도어 오픈 */
+                    F_IceOpen = SET;            /* 얼음 1차 도어 오픈 */
+
+                    /* 역회전 제어가 없으면 바로 피더 제어 */
+                    if((bit_ice_out_back_1s_state == CLEAR)
+                    && (bit_ice_out_back_state == CLEAR)
+                    )
+                    {
+                        /* 정량추출 시 정역회전 1초 추가 250926 CH.PARK */
+                        gu8_ice_feeder_shake = SET;
+                        gu8_ice_feeder_shake_time = 0;
+                    }
+                    else
+                    {
+                        if(bit_ice_out_back_1s_state == SET)
+                        {
+                            gu8_ice_out_reverse_1s_timer = ICE_OUT_BACK_1S_DELAY_TIME;
+                        }
+                        else if(bit_ice_out_back_state == SET)
+                        {
+                            gu8_ice_out_reverse_timer = ICE_OUT_BACK_2S_DELAY_TIME;
+                        }
+                    }
+
+                    /* 아이스 도어 강제 닫힘 기능값 겹치는 경우 FULL OPEN */
+                    if( gu16IceDoorCloseResetTimer  != 0 )
+                    {
+                        gu16_Ice_Door_StepMotor = 0;
+                    }
+                    else {  }
+
+                    if(gu16IceSelectDoorCloseResetTimer != 0)
+                    {
+                        gu16_IceSelect_StepMotor  = 0;
+                    }
+                    else {  }
+                }
+                else
+                {
+                    /* 얼음타입 : [조각] 선택 후 동작 */
+                    /* 역회전 제어가 없으면 바로 피더 제어 */
+                    if((bit_ice_out_back_1s_state == CLEAR)
+                    && (bit_ice_out_back_state == CLEAR)
+                    )
+                    {
+
+                    }
+                    else
+                    {
+                        if(bit_ice_out_back_1s_state == SET)
+                        {
+                            gu8_ice_out_reverse_1s_timer = ICE_OUT_BACK_1S_DELAY_TIME;
+                        }
+                        else if(bit_ice_out_back_state == SET)
+                        {
+                            gu8_ice_out_reverse_timer = ICE_OUT_BACK_2S_DELAY_TIME;
+                        }
+                    }
+
+                    F_IceSelect = CLEAR;          /* 얼음 1차 도어 오픈 */
+
+                    /* 2025-10-02 CH.PARK 조각얼음은 추출할 때 정역회전 들어가면 안됨 */
+                    gu8_ice_feeder_shake = CLEAR;
+                    gu8_ice_feeder_shake_time = 0;
+
+                    /* 2025-10-02 CH.PARK 기존 30%에서 100% 닫는거로 변경 */
+                    if(gu16_IceSelect_StepMotor == 0)
+                    {
+                        // gu16_IceSelect_StepMotor = STEP_ANGLE_TEMP_SELECT;
+                        gu16_IceSelect_StepMotor = STEP_ANGLE_SELECT;
+                        F_IceSelectClose = SET;
+                    }
+                    else {  }
+
+                    F_IceOpen = SET;              /* 얼음 최종도어  오픈 */
+                }
+
+                /* 얼음 추출 시 내보낼 음성안내 */
+                /*.. sean [25-5-31] 이상이 있는 경우 후순위에 있는 음성이 출력되기 때문에 해당 내용으로 추가..*/
+                if( Bit3_Leakage_Sensor_Error__E01 == SET )
+                {
+                    // play_voice_leakage_error_12();
+                    play_melody_warning_197();
+                    gu8_error_popup_enable = SET;
+                }
+                else if( bit_sleep_mode_start == SET )
+                {
+                    play_voice_sleep_mode_ice_extract_52();
+                }
+                else {  }
+            }
+            else
+            {
+                ice_extraction_finish();
+            }
+        }
+        else
+        {
+            ice_extraction_finish();
+        }
+    }
+
+    gu8_clock_hide_state = SET;
+    gu8_clock_hide_timer = 0;
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void ice_extraction_finish(void)
+{
+    if( F_IceOut == SET )
+    {
+        F_IceOut = CLEAR;
+        gu8_ice_out_continue = CLEAR;
+        F_IceBreak_Motor_Out = CLEAR;
+
+        /* 냉온정 + 얼음 동시에 연속추출 시 추출량 증가가 1L까지만 되는 현상 개선 250718 CH.PARK */
+        Extract_Stack.U8_iceSelect = CLEAR;
+
+        gu8_normal_ice_acc_cur_count_100ms = CLEAR;
+        gu8_normal_ice_acc_set_count_100ms = CLEAR;
+        gu8_normal_ice_stay_count = CLEAR;
+        bit_normal_ice_out_start = CLEAR;
+
+        /*..hui [20-4-22오전 10:44:03] 역회전 조건 만족하지 않을경우 즉시 만빙 감지..*/
+        /*..hui [20-4-22오전 10:44:15] 역회전 조건이면 역회전 완료하고 만빙 감지..*/
+        if( bit_ice_out_back_state == CLEAR )
+        {
+            F_IR = SET;
+            F_Low_IR = SET;
+        }
+        else{}
+
+        F_IceOutCCW = CLEAR;
+        gu8IceClose = ICE_DOOR_CLOSE_TIME_100MS;
+
+        /* 이너도어 CLOSE 지연 시간 적용 */
+        gu8IceInnerClose = ICE_SELECT_CLOSE_TIME_100MS;
+        F_ExtractKeySet = CLEAR;
+
+        gu8_Ice_Out_Step = STATE_0_ICE_STANDBY_STATE;
+        gu16_ice_out_timer = 0;
+        gu16_ice_extract_timer_100ms = 0;
+
+        /* 얼음추출일 때에만 얼음추출 완료음 발생 */
+        if(u8IceOutState == ICE_SELECT__ICE_WATER)
+        {
+            /* 얼음물은 물 추출이 아닌 상태라면 얼음 추출이 끝났다는 걸 표현 250730 CH.PARK */
+            if(F_WaterOut == CLEAR)
+            {
+                play_melody_setting_off_199();
+            }
+            else {  }
+        }
+        else
+        {
+            /* 물 추출중인데 얼음 추출을 완료하면 얼음 선택상태 즉시 해제 */
+            if(F_WaterOut == SET)
+            {
+                u8IceOutState = ICE_SELECT__NONE;
+            }
+            else {  }
+
+            if(bit_sleep_mode_start == CLEAR)
+            {
+                play_melody_setting_off_199();
+            }
+            else {}
+        }
+
+        /* 2025-10-28 CH.PARK 리드스위치 사용하는 모델인 경우에만 신규 사양적용 */
+        if(model.u8model == MODEL_REED_USE)
+        {
+            /* 2025-10-28 CH.PARK 얼음걸림 체크 시작 */
+            IceStuck.u8IceJamCheck = SET;
+        }
+    }
+    else{}
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+void ice_extract_key(void)
+{
+    if( F_All_Lock == SET )
+    {
+        play_voice_all_lock_select_103();
+        start_all_lock_flick();
+    }
+    else
+    {
+        ice_extraction_start();
+    }
+}
+
+#ifdef _DISPLAY_FCT_SUB_LINE_
+void Display_Test_Mode_Ice_Extract_Key_Short_Input(void)
+{
+	if(Disp_test_step == DISPLAY_TEST_BTN15)
+	{
+        Disp_test_step++;
+        display_test_flick_timer_100ms = 0;
+        play_voice_test_mode_151();
+	}
+}
+#else
+void Display_Test_Mode_Ice_Extract_Key_Short_Input(void)
+{
+    if(gu8_ice_ext_test_input < 1)
+    {
+        gu8_ice_ext_test_input++;
+    }
+    else {  }
+
+    // if(gu8_ice_ext_test_input >= 2)
+    // {
+    //     gu8_ice_ext_test_input = 0;
+    // }
+    // else{}
+
+    play_voice_test_mode_151();
+}
+#endif
+
+void Uart_Test_Mode_Ice_Extract_Key_Short_Input(void)
+{
+	gu8_ice_ext_test_input++;
+
+    if(gu8_ice_ext_test_input >= 2)
+    {
+        gu8_ice_ext_test_input = 0;
+    }
+    else{}
+}
+
+/***********************************************************************************************************************
+* Function Name: System_ini
+* Description  :
+***********************************************************************************************************************/
+
+

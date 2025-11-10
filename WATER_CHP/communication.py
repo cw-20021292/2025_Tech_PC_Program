@@ -24,13 +24,14 @@ class ProtocolHandler:
     
     # CMD와 DATA FIELD LENGTH 매핑 (PC → 메인)
     CMD_LENGTH_MAP = {
+        0x0F: 0,   # Heartbeat
         0xF0: 0,   # 상태조회 (POLLING)
         0xA0: 20,  # 밸브 부하 변경 (DATA1~5: NOS 밸브, DATA6~20: FEED 밸브)
         0xA1: 1,   # 드레인 펌프 출력 변경
         0xB0: 4,   # 공조시스템
         0xB1: 4,   # 냉각운전 변경 (TARGET RPS, TARGET TEMP, 냉각 동작, 냉각 ON 온도)
         0xB2: 7,   # 제빙운전 변경 (TARGET RPS, TARGET TEMP, 제빙 동작, 제빙시간, 입수용량)
-        0xB3: 48,  # 제빙테이블 적용
+        0xB3: 93,  # 제빙테이블 적용 (DATA1: 행인덱스 1바이트, DATA2~93: 테이블 46개x2바이트)
         0xB4: 4,   # 보냉운전 변경 (TARGET RPS, TARGET TEMP, TARGET TEMP FIRST, TRAY POSITION)
         0xC0: 7    # 센서값 변경
     }
@@ -95,10 +96,10 @@ class ProtocolHandler:
                 wCRCin &= 0xFFFF
         return wCRCin
     
-    def create_packet(self, tx_id, rx_id, cmd, data_field=None):
+    def create_packet(self, tx_id, cmd, data_field=None):
         """
         프로토콜 패킷 생성
-        STX + TX ID + RX ID + CMD + DATA FIELD LENGTH + DATA FIELD + CRC16 + ETX
+        STX + TX ID + CMD + DATA FIELD LENGTH + DATA FIELD + CRC16 + ETX
         """
         if cmd not in self.CMD_LENGTH_MAP:
             raise ValueError(f"지원하지 않는 CMD: 0x{cmd:02X}")
@@ -111,11 +112,10 @@ class ProtocolHandler:
         elif len(data_field) != expected_length:
             raise ValueError(f"CMD 0x{cmd:02X}의 DATA FIELD는 {expected_length}바이트여야 합니다 (현재: {len(data_field)}바이트)")
         
-        # 패킷 구성
+        # 패킷 구성 (RX ID 제거)
         packet = bytearray()
         packet.append(self.STX)
         packet.append(tx_id)
-        packet.append(rx_id)
         packet.append(cmd)
         packet.append(expected_length)
         packet.extend(data_field)
@@ -132,31 +132,30 @@ class ProtocolHandler:
         
         return bytes(packet)
     
-    def create_heartbeat_packet(self, tx_id=PC_ID, rx_id=MAIN_ID):
-        """CMD 0x0F (Heartbeat) 패킷 생성"""
-        return self.create_packet(tx_id, rx_id, 0x0F)
+    def create_heartbeat_packet(self, tx_id=PC_ID):
+        """CMD 0x0F (Heartbeat) 패킷 생성 (RX ID 제거)"""
+        return self.create_packet(tx_id, 0x0F)
     
     def parse_packet(self, packet_data):
-        """패킷 파싱"""
-        if len(packet_data) < 8:  # 최소 패킷 크기
+        """패킷 파싱 (RX ID 제거)"""
+        if len(packet_data) < 7:  # 최소 패킷 크기 (RX ID 제거로 1바이트 감소)
             return None
         
         try:
             stx = packet_data[0]
             tx_id = packet_data[1]
-            rx_id = packet_data[2]
-            cmd = packet_data[3]
-            data_length = packet_data[4]
+            cmd = packet_data[2]
+            data_length = packet_data[3]
             
-            expected_total = 7 + data_length  # STX + IDs + CMD + LEN + DATA + CRC16 + ETX
+            expected_total = 6 + data_length  # STX + TX_ID + CMD + LEN + DATA + CRC16 + ETX
             
             if len(packet_data) != expected_total:
                 return None
             
-            data_field = packet_data[5:5+data_length]
+            data_field = packet_data[4:4+data_length]
             # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
-            crc_high = packet_data[5+data_length]
-            crc_low = packet_data[5+data_length+1]
+            crc_high = packet_data[4+data_length]
+            crc_low = packet_data[4+data_length+1]
             crc_received = (crc_high << 8) | crc_low
             etx = packet_data[-1]
             
@@ -173,7 +172,6 @@ class ProtocolHandler:
             
             return {
                 'tx_id': tx_id,
-                'rx_id': rx_id,
                 'cmd': cmd,
                 'data_length': data_length,
                 'data_field': data_field,
@@ -376,19 +374,17 @@ class SerialCommunication:
                     self.status_queue.put(('ERROR', f"Heartbeat 오류: {str(e)}"))
                 break
     
-    def send_packet(self, cmd, data_field=None, tx_id=None, rx_id=None):
-        """프로토콜 패킷 전송"""
+    def send_packet(self, cmd, data_field=None, tx_id=None):
+        """프로토콜 패킷 전송 (RX ID 제거)"""
         if not self.is_connected:
             return False, "연결되지 않음"
         
         try:
             if tx_id is None:
                 tx_id = self.protocol.PC_ID
-            if rx_id is None:
-                rx_id = self.protocol.MAIN_ID
             
-            # 패킷 생성 (STX와 ETX 포함)
-            packet = self.protocol.create_packet(tx_id, rx_id, cmd, data_field)
+            # 패킷 생성 (STX와 ETX 포함, RX ID 제거)
+            packet = self.protocol.create_packet(tx_id, cmd, data_field)
             
             # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
             if len(packet) < 2:
@@ -556,10 +552,10 @@ class DataParser:
                 wCRCin &= 0xFFFF
         return wCRCin
     
-    def create_packet(self, tx_id, rx_id, cmd, data_field=None):
+    def create_packet(self, tx_id, cmd, data_field=None):
         """
         프로토콜 패킷 생성
-        STX + TX ID + RX ID + CMD + DATA FIELD LENGTH + DATA FIELD + CRC16 + ETX
+        STX + TX ID + CMD + DATA FIELD LENGTH + DATA FIELD + CRC16 + ETX
         """
         if cmd not in self.CMD_LENGTH_MAP:
             raise ValueError(f"지원하지 않는 CMD: 0x{cmd:02X}")
@@ -572,11 +568,10 @@ class DataParser:
         elif len(data_field) != expected_length:
             raise ValueError(f"CMD 0x{cmd:02X}의 DATA FIELD는 {expected_length}바이트여야 합니다")
         
-        # 패킷 구성
+        # 패킷 구성 (RX ID 제거)
         packet = bytearray()
         packet.append(self.STX)
         packet.append(tx_id)
-        packet.append(rx_id)
         packet.append(cmd)
         packet.append(expected_length)
         packet.extend(data_field)
@@ -593,31 +588,30 @@ class DataParser:
         
         return bytes(packet)
     
-    def create_heartbeat_packet(self, tx_id=PC_ID, rx_id=MAIN_ID):
-        """CMD 0x0F (Heartbeat) 패킷 생성"""
-        return self.create_packet(tx_id, rx_id, 0x0F)
+    def create_heartbeat_packet(self, tx_id=PC_ID):
+        """CMD 0x0F (Heartbeat) 패킷 생성 (RX ID 제거)"""
+        return self.create_packet(tx_id, 0x0F)
     
     def parse_packet(self, packet_data):
-        """패킷 파싱"""
-        if len(packet_data) < 8:  # 최소 패킷 크기
+        """패킷 파싱 (RX ID 제거)"""
+        if len(packet_data) < 7:  # 최소 패킷 크기 (RX ID 제거로 1바이트 감소)
             return None
         
         try:
             stx = packet_data[0]
             tx_id = packet_data[1]
-            rx_id = packet_data[2]
-            cmd = packet_data[3]
-            data_length = packet_data[4]
+            cmd = packet_data[2]
+            data_length = packet_data[3]
             
-            expected_total = 7 + data_length  # STX + IDs + CMD + LEN + DATA + CRC16 + ETX
+            expected_total = 6 + data_length  # STX + TX_ID + CMD + LEN + DATA + CRC16 + ETX
             
             if len(packet_data) != expected_total:
                 return None
             
-            data_field = packet_data[5:5+data_length]
+            data_field = packet_data[4:4+data_length]
             # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
-            crc_high = packet_data[5+data_length]
-            crc_low = packet_data[5+data_length+1]
+            crc_high = packet_data[4+data_length]
+            crc_low = packet_data[4+data_length+1]
             crc_received = (crc_high << 8) | crc_low
             etx = packet_data[-1]
             
@@ -634,7 +628,6 @@ class DataParser:
             
             return {
                 'tx_id': tx_id,
-                'rx_id': rx_id,
                 'cmd': cmd,
                 'data_length': data_length,
                 'data_field': data_field,
@@ -837,19 +830,17 @@ class SerialCommunication:
                     self.status_queue.put(('ERROR', f"Heartbeat 오류: {str(e)}"))
                 break
     
-    def send_packet(self, cmd, data_field=None, tx_id=None, rx_id=None):
-        """프로토콜 패킷 전송"""
+    def send_packet(self, cmd, data_field=None, tx_id=None):
+        """프로토콜 패킷 전송 (RX ID 제거)"""
         if not self.is_connected:
             return False, "연결되지 않음"
         
         try:
             if tx_id is None:
                 tx_id = self.protocol.PC_ID
-            if rx_id is None:
-                rx_id = self.protocol.MAIN_ID
             
-            # 패킷 생성 (STX와 ETX 포함)
-            packet = self.protocol.create_packet(tx_id, rx_id, cmd, data_field)
+            # 패킷 생성 (STX와 ETX 포함, RX ID 제거)
+            packet = self.protocol.create_packet(tx_id, cmd, data_field)
             
             # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
             if len(packet) < 2:

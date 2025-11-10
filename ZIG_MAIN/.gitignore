@@ -1,0 +1,15 @@
+# Debug files
+*.mtud
+.vscode/
+DOC/
+.git_backUp/
+WESTERN_ICE.si4project/
+edit/
+Hex Output/
+DefaultBuild/
+Boot/DefaultBuild
+Flash/DefaultBuild
+source/Document/
+source/MMI/
+source/WesternAis.si4project/
+/Icon_AIS_Mini.si4project

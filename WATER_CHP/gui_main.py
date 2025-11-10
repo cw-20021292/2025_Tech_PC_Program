@@ -2,7 +2,7 @@
 메인 GUI 모듈 - 프로토콜 적용 (전체 기능 유지)
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 import os
@@ -29,8 +29,8 @@ class MainGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("코웨이 정수기 시스템 검토 프로그램 - 프로토콜 적용")
-        self.root.geometry("1000x850")
-        self.root.resizable(True, True)
+        self.root.geometry("1000x880")  # Log 삭제 버튼까지 보이는 높이로 조정
+        self.root.resizable(True, False)  # 가로만 조정 가능, 세로 크기 고정
         
         # 통신 모듈 초기화
         self.comm = SerialCommunication()
@@ -650,13 +650,96 @@ class MainGUI:
                     f"Sheet={sheet_name}",
                     "blue"
                 )
+                
+                # 제빙테이블 데이터 읽기
+                table_data = self.excel_sheet_selector.read_icemaking_table_data(sheet_name)
+                
+                if table_data is None:
+                    self.log_communication("제빙테이블 데이터 읽기 실패", "red")
+                    return
+                
+                # 데이터 전송 시작
                 file_name = os.path.basename(self.excel_sheet_selector.selected_file_path)
+                self.log_communication(
+                    f"제빙테이블 데이터 전송 시작: {file_name} - {sheet_name}",
+                    "purple"
+                )
+                
+                # 46개 행에 대해 각각 CMD 0xB3 패킷 전송
+                water_temps = table_data['water_temps']
+                outdoor_temps = table_data['outdoor_temps']
+                table_rows = table_data['table_data']
+                
+                success_count = 0
+                fail_count = 0
+                
+                for row_idx in range(46):  # 0~45행
+                    try:
+                        # DATA FIELD 생성 (93바이트)
+                        # DATA1: 행 인덱스 (1바이트)
+                        # DATA2~93: 테이블 데이터 46개 x 2바이트 = 92바이트
+                        data_field = bytearray(93)
+                        
+                        # DATA1: 행 인덱스 (0~45)
+                        data_field[0] = row_idx
+                        
+                        # DATA2~DATA93: 테이블 데이터 46개 (B~AU열), 각 2바이트
+                        for col_idx in range(46):
+                            table_value = int(table_rows[row_idx][col_idx])
+                            # 범위 체크 (0~65535)
+                            if table_value < 0:
+                                table_value = 0
+                            elif table_value > 65535:
+                                table_value = 65535
+                            
+                            # 2바이트로 변환 (상위 바이트, 하위 바이트)
+                            high_byte = (table_value >> 8) & 0xFF  # 상위 바이트
+                            low_byte = table_value & 0xFF           # 하위 바이트
+                            
+                            # DATA2부터 시작, 각 값마다 2바이트 할당
+                            data_field[1 + (col_idx * 2)] = high_byte      # 상위 바이트
+                            data_field[1 + (col_idx * 2) + 1] = low_byte   # 하위 바이트
+                        
+                        # CMD 0xB3 패킷 전송
+                        success, message = self.comm.send_packet(0xB3, bytes(data_field))
+                        
+                        water_temp = int(water_temps[row_idx])
+                        if success:
+                            success_count += 1
+                            self.log_communication(
+                                f"  [{row_idx+1}/46] 입수온도 {water_temp}℃ 데이터 전송 성공",
+                                "gray"
+                            )
+                        else:
+                            fail_count += 1
+                            self.log_communication(
+                                f"  [{row_idx+1}/46] 입수온도 {water_temp}℃ 데이터 전송 실패: {message}",
+                                "red"
+                            )
+                        
+                        # 패킷 간 약간의 딜레이 (10ms)
+                        time.sleep(0.01)
+                        
+                    except Exception as e:
+                        fail_count += 1
+                        self.log_communication(
+                            f"  [{row_idx+1}/46] 데이터 처리 오류: {str(e)}",
+                            "red"
+                        )
+                
+                # 전송 완료 메시지
+                self.log_communication(
+                    f"제빙테이블 데이터 전송 완료: 성공 {success_count}개, 실패 {fail_count}개",
+                    "green" if fail_count == 0 else "orange"
+                )
+                
                 messagebox.showinfo(
-                    "알림",
-                    f"Sheet '{sheet_name}'가 선택되었습니다.\n\n"
+                    "제빙테이블 적용 완료",
                     f"파일: {file_name}\n"
                     f"Sheet: {sheet_name}\n\n"
-                    "추가 처리 로직은 이후 구현 예정입니다."
+                    f"총 {46}개 패킷 전송\n"
+                    f"성공: {success_count}개\n"
+                    f"실패: {fail_count}개"
                 )
         
         # Excel 파일 선택 및 Sheet 선택 다이얼로그 표시
@@ -1596,9 +1679,21 @@ class MainGUI:
                                      command=self.toggle_connection)
         self.connect_btn.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
+        # Log 추출 버튼
+        self.log_export_btn = ttk.Button(right_frame, text="Log 추출",
+                                        command=self.export_log,
+                                        state="disabled")
+        self.log_export_btn.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        
+        # Log 삭제 버튼
+        self.log_clear_btn = ttk.Button(right_frame, text="Log 삭제",
+                                       command=self.clear_log,
+                                       state="disabled")
+        self.log_clear_btn.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        
         # CMD 전송 버튼들 (0xA0 제외)
         cmd_frame = ttk.LabelFrame(right_frame, text="CMD 전송", padding="2")
-        cmd_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        cmd_frame.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
         self.cmd_buttons = {}
         cmds = [0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]  # 0xA0 제거
@@ -1666,6 +1761,12 @@ class MainGUI:
                 # 보냉 제어 버튼 활성화
                 self.refrigeration_system.set_connection_state(True)
                 
+                # Log 추출/삭제 버튼 활성화
+                if hasattr(self, 'log_export_btn'):
+                    self.log_export_btn.config(state="normal")
+                if hasattr(self, 'log_clear_btn'):
+                    self.log_clear_btn.config(state="normal")
+                
                 self.log_communication(f"포트 {port} 연결됨", "green")
             else:
                 self.log_communication(f"연결 실패: {message}", "red")
@@ -1701,6 +1802,12 @@ class MainGUI:
                 
                 # 보냉 제어 버튼 비활성화
                 self.refrigeration_system.set_connection_state(False)
+                
+                # Log 추출/삭제 버튼 비활성화
+                if hasattr(self, 'log_export_btn'):
+                    self.log_export_btn.config(state="disabled")
+                if hasattr(self, 'log_clear_btn'):
+                    self.log_clear_btn.config(state="disabled")
                 
                 self.log_communication("연결 해제됨", "orange")
     
@@ -1836,27 +1943,25 @@ class MainGUI:
         """수신된 프로토콜 패킷 처리"""
         try:
             tx_id = packet_info['tx_id']
-            rx_id = packet_info['rx_id']
             cmd = packet_info['cmd']
             data_field = packet_info['data_field']
             
             device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
             tx_name = device_names.get(tx_id, f"0x{tx_id:02X}")
-            rx_name = device_names.get(rx_id, f"0x{rx_id:02X}")
             
             hex_data = " ".join([f"{b:02X}" for b in data_field]) if data_field else "없음"
             
             # CMD 0x0F (상태응답) 처리
             if cmd == 0x0F:
                 # POLLING [메인 → PC] 상태응답 처리
-                if tx_id == 0x02 and rx_id == 0x01:  # 메인 → PC
-                    self.log_communication(f"수신: {tx_name}→{rx_name}, CMD 0x{cmd:02X} (상태응답), 데이터: {hex_data}", "green")
+                if tx_id == 0x02:  # 메인 → PC
+                    self.log_communication(f"수신: {tx_name}, CMD 0x{cmd:02X} (상태응답), 데이터: {hex_data}", "green")
                     self.process_status_response(data_field)
                 else:
                     # Heartbeat는 로그에서 제외
                     pass
             else:
-                log_msg = f"수신: {tx_name}→{rx_name}, CMD 0x{cmd:02X}, 데이터: {hex_data}"
+                log_msg = f"수신: {tx_name}, CMD 0x{cmd:02X}, 데이터: {hex_data}"
                 self.log_communication(log_msg, "green")
             
             # CMD별 데이터 처리
@@ -1980,20 +2085,18 @@ class MainGUI:
             if etx != 0x03:
                 self.log_communication(f"경고: 전송 패킷의 ETX가 올바르지 않습니다 (예상: 0x03, 실제: 0x{etx:02X})", "orange")
             
-            cmd = data[3]
+            cmd = data[2]  # RX ID 제거로 인덱스 변경
             
             # Heartbeat는 생략
             if cmd != 0x0F:
                 tx_id = data[1]
-                rx_id = data[2]
                 
                 device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
                 tx_name = device_names.get(tx_id, f"0x{tx_id:02X}")
-                rx_name = device_names.get(rx_id, f"0x{rx_id:02X}")
                 
                 # 전체 패킷 HEX 출력 (STX와 ETX 포함)
                 hex_packet = " ".join([f"{b:02X}" for b in data])
-                log_msg = f"송신: {tx_name}→{rx_name}, CMD 0x{cmd:02X} [STX: 0x{stx:02X}, ETX: 0x{etx:02X}]"
+                log_msg = f"송신: {tx_name}, CMD 0x{cmd:02X} [STX: 0x{stx:02X}, ETX: 0x{etx:02X}]"
                 self.log_communication(log_msg, "blue")
                 self.log_communication(f"  전체 패킷 (HEX): {hex_packet}", "gray")
         
@@ -2058,6 +2161,47 @@ class MainGUI:
                 self.comm_text.delete(1.0, "2.0")
         
         self.root.after(0, _log)
+    
+    def export_log(self):
+        """통신 로그를 파일로 저장"""
+        # 현재 로그 내용 가져오기
+        log_content = self.comm_text.get("1.0", tk.END)
+        
+        if not log_content.strip():
+            messagebox.showwarning("경고", "저장할 로그가 없습니다.")
+            return
+        
+        # 파일 저장 다이얼로그
+        file_path = filedialog.asksaveasfilename(
+            title="통신 로그 저장",
+            defaultextension=".txt",
+            filetypes=[
+                ("텍스트 파일", "*.txt"),
+                ("모든 파일", "*.*")
+            ],
+            initialfile=f"comm_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+                self.log_communication(f"로그 저장 완료: {os.path.basename(file_path)}", "green")
+                messagebox.showinfo("성공", f"로그가 저장되었습니다.\n\n{file_path}")
+            except Exception as e:
+                self.log_communication(f"로그 저장 실패: {str(e)}", "red")
+                messagebox.showerror("오류", f"로그 저장 중 오류가 발생했습니다.\n{str(e)}")
+    
+    def clear_log(self):
+        """통신 로그 삭제"""
+        result = messagebox.askyesno(
+            "확인",
+            "통신 로그를 모두 삭제하시겠습니까?"
+        )
+        
+        if result:
+            self.comm_text.delete("1.0", tk.END)
+            self.log_communication("로그가 삭제되었습니다.", "blue")
     
     def toggle_graph1_item(self, item_key):
         """그래프1 항목 토글"""

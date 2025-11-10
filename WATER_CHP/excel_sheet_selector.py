@@ -40,8 +40,8 @@ class ExcelSheetSelector:
             return None
         
         try:
-            # Excel 파일 열기
-            self.workbook = openpyxl.load_workbook(file_path, read_only=True)
+            # Excel 파일 열기 (data_only=True로 수식이 아닌 값만 읽기)
+            self.workbook = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             self.selected_file_path = file_path
             return file_path
         except Exception as e:
@@ -218,6 +218,143 @@ class ExcelSheetSelector:
             openpyxl.workbook.Workbook: Workbook 객체, 없으면 None
         """
         return self.workbook
+    
+    def read_icemaking_table_data(self, sheet_name):
+        """
+        제빙테이블 데이터를 읽어옵니다.
+        
+        데이터 구조:
+        - A4~A49: 입수온도 (세로 헤더, 46개)
+        - B3~AU3: 외기온도 (가로 헤더, 46개)
+        - B4~AU49: 테이블 데이터 (46행 x 46열)
+        
+        Args:
+            sheet_name: 읽을 Sheet 이름
+            
+        Returns:
+            dict: {
+                'water_temps': [A4~A49 값들],
+                'outdoor_temps': [B3~AU3 값들],
+                'table_data': [[B4~AU4], [B5~AU5], ..., [B49~AU49]]
+            }
+            실패 시 None
+        """
+        if self.workbook is None:
+            return None
+        
+        try:
+            # Sheet 선택
+            sheet = self.workbook[sheet_name]
+            
+            # 입수온도 읽기 (A4~A49, 46개)
+            water_temps = []
+            for row in range(4, 50):  # A4~A49
+                cell_value = sheet[f'A{row}'].value
+                if cell_value is not None:
+                    water_temps.append(float(cell_value))
+                else:
+                    water_temps.append(0.0)
+            
+            # 외기온도 읽기 (B3~AU3, 46개)
+            outdoor_temps = []
+            # B=2열부터 AU=47열까지
+            for col in range(2, 48):  # B(2) ~ AU(47)
+                cell_value = sheet.cell(row=3, column=col).value
+                if cell_value is not None:
+                    outdoor_temps.append(float(cell_value))
+                else:
+                    outdoor_temps.append(0.0)
+            
+            # 테이블 데이터 읽기 (B4~AU49, 46행 x 46열)
+            table_data = []
+            for row in range(4, 50):  # 4~49행
+                row_data = []
+                for col in range(2, 48):  # B(2)~AU(47)열
+                    cell_value = sheet.cell(row=row, column=col).value
+                    if cell_value is not None:
+                        row_data.append(float(cell_value))
+                    else:
+                        row_data.append(0.0)
+                table_data.append(row_data)
+            
+            return {
+                'water_temps': water_temps,
+                'outdoor_temps': outdoor_temps,
+                'table_data': table_data
+            }
+            
+        except Exception as e:
+            messagebox.showerror(
+                "오류",
+                f"제빙테이블 데이터를 읽을 수 없습니다.\n{str(e)}"
+            )
+            return None
+    
+    def read_sheet_data(self, sheet_name):
+        """
+        선택된 Sheet의 데이터를 읽어옵니다.
+        
+        Args:
+            sheet_name: 읽을 Sheet 이름
+            
+        Returns:
+            dict: 읽은 데이터 {'outdoor_temps': [], 'water_temps': [], 'table_data': []}
+                  실패 시 None
+        """
+        if not self.workbook or not sheet_name:
+            return None
+        
+        try:
+            sheet = self.workbook[sheet_name]
+            
+            # 외기온도 헤더 읽기 (B3~AU3, 열 인덱스 2~47)
+            outdoor_temps = []
+            for col in range(2, 48):  # B(2)부터 AU(47)까지 46개
+                cell_value = sheet.cell(row=3, column=col).value
+                if cell_value is not None:
+                    try:
+                        outdoor_temps.append(int(float(cell_value)))
+                    except (ValueError, TypeError):
+                        outdoor_temps.append(0)
+                else:
+                    outdoor_temps.append(0)
+            
+            # 입수온도 헤더 읽기 (A4~A49, 행 인덱스 4~49)
+            water_temps = []
+            for row in range(4, 50):  # A4(4)부터 A49(49)까지 46개
+                cell_value = sheet.cell(row=row, column=1).value
+                if cell_value is not None:
+                    try:
+                        water_temps.append(int(float(cell_value)))
+                    except (ValueError, TypeError):
+                        water_temps.append(0)
+                else:
+                    water_temps.append(0)
+            
+            # 테이블 데이터 읽기 (B4~AU49)
+            table_data = []
+            for row in range(4, 50):  # 행 4~49 (46개 행)
+                row_data = []
+                for col in range(2, 48):  # 열 B~AU (46개 열)
+                    cell_value = sheet.cell(row=row, column=col).value
+                    if cell_value is not None:
+                        try:
+                            row_data.append(int(float(cell_value)))
+                        except (ValueError, TypeError):
+                            row_data.append(0)
+                    else:
+                        row_data.append(0)
+                table_data.append(row_data)
+            
+            return {
+                'outdoor_temps': outdoor_temps,
+                'water_temps': water_temps,
+                'table_data': table_data
+            }
+        
+        except Exception as e:
+            print(f"Sheet 데이터 읽기 오류: {str(e)}")
+            return None
     
     def close_workbook(self):
         """열려있는 Workbook을 닫습니다."""
