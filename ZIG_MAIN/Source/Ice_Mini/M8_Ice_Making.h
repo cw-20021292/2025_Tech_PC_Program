@@ -9,6 +9,13 @@
 #ifndef _ICE_MAKING_H_
 #define _ICE_MAKING_H_
 
+void FreezingTable_Init(void);
+void FreezingTable_Init(void);
+void SetFreezingTable(U8 *DataBuffer);
+U16 GetFreezingTime(U8 RoomInTemp);
+U8 GetIceStep(void);
+void SetUsedFreezingTable(U8 Used);
+U8 GetUsedFreezingTable(void);
 
 //extern U8 CheckIceTray(void);
 extern void up_tray_motor(void);

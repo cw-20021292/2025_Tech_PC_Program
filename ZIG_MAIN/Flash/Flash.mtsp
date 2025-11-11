@@ -293,6 +293,7 @@
       <Name>WifiTx</Name>
       <Type>Category</Type>
       <ParentItem>dc3614f7-7170-43ac-88e0-9d06ceb09e7e</ParentItem>
+      <Property>ccc325cf-df3b-434c-9ac4-0e33921936ce</Property>
     </Instance>
     <Instance Guid="2f717f1b-888c-46b2-968d-a041fa1d6af0">
       <Name>WifiUserConfig</Name>
@@ -389,6 +390,7 @@
       <RelativePath>..\Source\Wifi\WifiInterface\WIFI_Common.h</RelativePath>
       <TreeImageGuid>03cad1e8-2eb3-4cde-a8a3-982423631122</TreeImageGuid>
       <ParentItem>4d62de38-51df-43ac-a977-a5b14515c544</ParentItem>
+      <Property>2945ec78-0005-466c-9207-f6fffaff32e1</Property>
     </Instance>
     <Instance Guid="919ba80c-a652-4689-a5f7-fa668ece699f">
       <Name>WIFI_Control.c</Name>
@@ -2994,6 +2996,9 @@
     <Instance Guid="d5f2e4b4-f8ee-4186-8ea2-da1fcd072c65">
       <MemoCount>0</MemoCount>
     </Instance>
+    <Instance Guid="2945ec78-0005-466c-9207-f6fffaff32e1">
+      <MemoCount>0</MemoCount>
+    </Instance>
     <Instance Guid="64edeeb3-5714-4bcb-b173-4148091896e3">
       <MemoCount>0</MemoCount>
     </Instance>
@@ -3918,6 +3923,9 @@
       <MemoCount>0</MemoCount>
     </Instance>
     <Instance Guid="18fc1e3b-d04b-438d-a7ae-8b82436cd1c8">
+      <MemoCount>0</MemoCount>
+    </Instance>
+    <Instance Guid="ccc325cf-df3b-434c-9ac4-0e33921936ce">
       <MemoCount>0</MemoCount>
     </Instance>
   </Class>
@@ -11090,7 +11098,7 @@ Lib
         &lt;cg_security7 Name="cg_security7" Value="00" /&gt;
         &lt;cg_security5 Name="cg_security5" Value="00" /&gt;
         &lt;cg_crc_area Name="cg_crc_area" Value="00" /&gt;
-        &lt;ocdstart Name="ocdstart" Value="3FF00" /&gt;
+        &lt;rrm Name="rrm" Value="3FF00" /&gt;
         &lt;cg_security3 Name="cg_security3" Value="00" /&gt;
         &lt;cg_security0 Name="cg_security0" Value="00" /&gt;
         &lt;cg_security1 Name="cg_security1" Value="00" /&gt;
@@ -11100,13 +11108,13 @@ Lib
         &lt;cg_option Name="cg_option" Value="84" /&gt;
         &lt;cg_security8 Name="cg_security8" Value="00" /&gt;
         &lt;cg_security6 Name="cg_security6" Value="00" /&gt;
-        &lt;cg_security4 Name="cg_security4" Value="00" /&gt;
+        &lt;ocdstart Name="ocdstart" Value="3FF00" /&gt;
         &lt;cg_onchip Name="cg_onchip" Value="" /&gt;
         &lt;cg_security2 Name="cg_security2" Value="00" /&gt;
         &lt;cg_iawctl_value Name="cg_iawctl_value" Value="00" /&gt;
         &lt;lvi_option Name="lvi_option" Value="7F" /&gt;
         &lt;wdt_option Name="wdt_option" Value="FF" /&gt;
-        &lt;rrm Name="rrm" Value="3FF00" /&gt;
+        &lt;cg_security4 Name="cg_security4" Value="00" /&gt;
       &lt;/GlobleUserTag&gt;
     &lt;/TAG&gt;
   &lt;/DIR&gt;

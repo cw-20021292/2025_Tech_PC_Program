@@ -10,7 +10,7 @@
 #include    "Global_Variable.h"
 #include    "Port_Define.h"
 #include    "Main.h"
-
+#include    "test_uart_comm.h"
 void main(void);
 void Sync_50MS(void);
 void Sync_100MS(void);
@@ -50,6 +50,8 @@ void main(void)
         Front_Communication();
         ProcessVoice_Main();
         self_test();
+
+        AT_UART_Communication();
 
         Save_Eeprom_Data();
         wifi();

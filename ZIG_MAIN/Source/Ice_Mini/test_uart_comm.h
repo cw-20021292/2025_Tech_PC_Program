@@ -9,6 +9,7 @@
 #ifndef _TEST_UART_COMM_H_
 #define _TEST_UART_COMM_H_
 
+void AT_UART_Communication(void);
 //
 extern U16 HexToAsc(U8 mu8RxdData);
 extern U8 AscToHex(U8 mu8RxdData1, U8 mu8RxdData2);

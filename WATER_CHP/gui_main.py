@@ -125,6 +125,13 @@ class MainGUI:
         # Excel Sheet 선택 모듈 초기화
         self.excel_sheet_selector = ExcelSheetSelector(self.root)
         
+        # 제빙테이블 데이터 저장 (Excel에서 읽은 데이터를 내부에 저장)
+        self.freezing_table_data = None  # {'outdoor_temps': [], 'water_temps': [], 'table_data': [[]]}
+        self.freezing_table_loaded = False  # 제빙테이블 로드 여부
+        
+        # 통신 디버그 모드 (True: 상세 로그 표시, False: 간단한 로그만 표시)
+        self.debug_comm = True  # 통신 문제 디버깅용
+        
         # 그래프 데이터
         self.graph_data = {
             'time': deque(maxlen=100),
@@ -646,7 +653,7 @@ class MainGUI:
             """Sheet 선택 시 호출되는 콜백 함수"""
             if sheet_name:
                 self.log_communication(
-                    f"제빙테이블 적용: Excel 파일={self.excel_sheet_selector.selected_file_path}, "
+                    f"제빙테이블 선택: Excel 파일={self.excel_sheet_selector.selected_file_path}, "
                     f"Sheet={sheet_name}",
                     "blue"
                 )
@@ -656,91 +663,33 @@ class MainGUI:
                 
                 if table_data is None:
                     self.log_communication("제빙테이블 데이터 읽기 실패", "red")
+                    self.freezing_table_loaded = False
                     return
                 
-                # 데이터 전송 시작
+                # 데이터를 내부에 저장 (바로 전송하지 않음)
+                self.freezing_table_data = table_data
+                self.freezing_table_loaded = True
+                
                 file_name = os.path.basename(self.excel_sheet_selector.selected_file_path)
                 self.log_communication(
-                    f"제빙테이블 데이터 전송 시작: {file_name} - {sheet_name}",
+                    f"제빙테이블 데이터 로드 완료: {file_name} - {sheet_name}",
+                    "green"
+                )
+                self.log_communication(
+                    f"  입수온도 범위: {table_data['water_temps'][0]}~{table_data['water_temps'][-1]}℃",
+                    "gray"
+                )
+                self.log_communication(
+                    f"  외기온도 범위: {table_data['outdoor_temps'][0]}~{table_data['outdoor_temps'][-1]}℃",
+                    "gray"
+                )
+                self.log_communication(
+                    f"제빙테이블이 메모리에 저장되었습니다. CMD 0x0F 응답을 대기 중...",
                     "purple"
                 )
                 
-                # 46개 행에 대해 각각 CMD 0xB3 패킷 전송
-                water_temps = table_data['water_temps']
-                outdoor_temps = table_data['outdoor_temps']
-                table_rows = table_data['table_data']
-                
-                success_count = 0
-                fail_count = 0
-                
-                for row_idx in range(46):  # 0~45행
-                    try:
-                        # DATA FIELD 생성 (93바이트)
-                        # DATA1: 행 인덱스 (1바이트)
-                        # DATA2~93: 테이블 데이터 46개 x 2바이트 = 92바이트
-                        data_field = bytearray(93)
-                        
-                        # DATA1: 행 인덱스 (0~45)
-                        data_field[0] = row_idx
-                        
-                        # DATA2~DATA93: 테이블 데이터 46개 (B~AU열), 각 2바이트
-                        for col_idx in range(46):
-                            table_value = int(table_rows[row_idx][col_idx])
-                            # 범위 체크 (0~65535)
-                            if table_value < 0:
-                                table_value = 0
-                            elif table_value > 65535:
-                                table_value = 65535
-                            
-                            # 2바이트로 변환 (상위 바이트, 하위 바이트)
-                            high_byte = (table_value >> 8) & 0xFF  # 상위 바이트
-                            low_byte = table_value & 0xFF           # 하위 바이트
-                            
-                            # DATA2부터 시작, 각 값마다 2바이트 할당
-                            data_field[1 + (col_idx * 2)] = high_byte      # 상위 바이트
-                            data_field[1 + (col_idx * 2) + 1] = low_byte   # 하위 바이트
-                        
-                        # CMD 0xB3 패킷 전송
-                        success, message = self.comm.send_packet(0xB3, bytes(data_field))
-                        
-                        water_temp = int(water_temps[row_idx])
-                        if success:
-                            success_count += 1
-                            self.log_communication(
-                                f"  [{row_idx+1}/46] 입수온도 {water_temp}℃ 데이터 전송 성공",
-                                "gray"
-                            )
-                        else:
-                            fail_count += 1
-                            self.log_communication(
-                                f"  [{row_idx+1}/46] 입수온도 {water_temp}℃ 데이터 전송 실패: {message}",
-                                "red"
-                            )
-                        
-                        # 패킷 간 약간의 딜레이 (10ms)
-                        time.sleep(0.01)
-                        
-                    except Exception as e:
-                        fail_count += 1
-                        self.log_communication(
-                            f"  [{row_idx+1}/46] 데이터 처리 오류: {str(e)}",
-                            "red"
-                        )
-                
-                # 전송 완료 메시지
-                self.log_communication(
-                    f"제빙테이블 데이터 전송 완료: 성공 {success_count}개, 실패 {fail_count}개",
-                    "green" if fail_count == 0 else "orange"
-                )
-                
-                messagebox.showinfo(
-                    "제빙테이블 적용 완료",
-                    f"파일: {file_name}\n"
-                    f"Sheet: {sheet_name}\n\n"
-                    f"총 {46}개 패킷 전송\n"
-                    f"성공: {success_count}개\n"
-                    f"실패: {fail_count}개"
-                )
+                # 제빙테이블 뷰어 표시
+                self.show_icemaking_table_viewer(table_data, file_name, sheet_name)
         
         # Excel 파일 선택 및 Sheet 선택 다이얼로그 표시
         selected_sheet = self.excel_sheet_selector.show_sheet_selection_dialog(
@@ -752,6 +701,291 @@ class MainGUI:
                 f"제빙테이블 적용 완료: Sheet={selected_sheet}",
                 "green"
             )
+    
+    def show_icemaking_table_viewer(self, table_data, file_name, sheet_name):
+        """제빙테이블 데이터를 시각적으로 표시하는 팝업 창
+        
+        Args:
+            table_data: 제빙테이블 데이터 (water_temps, outdoor_temps, table_data)
+            file_name: Excel 파일명
+            sheet_name: Sheet 이름
+        """
+        try:
+            water_temps = table_data['water_temps']
+            outdoor_temps = table_data['outdoor_temps']
+            table_values = table_data['table_data']
+            
+            # 팝업 창 생성
+            viewer = tk.Toplevel(self.root)
+            viewer.title(f"제빙테이블 뷰어 - {file_name} ({sheet_name})")
+            viewer.geometry("1200x700")
+            viewer.transient(self.root)
+            
+            # 중앙 정렬
+            viewer.update_idletasks()
+            x = (viewer.winfo_screenwidth() // 2) - (viewer.winfo_width() // 2)
+            y = (viewer.winfo_screenheight() // 2) - (viewer.winfo_height() // 2)
+            viewer.geometry(f"+{x}+{y}")
+            
+            # 메인 프레임
+            main_frame = ttk.Frame(viewer, padding="10")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # 제목 라벨
+            title_label = ttk.Label(
+                main_frame,
+                text=f"제빙테이블: {file_name} - {sheet_name}",
+                font=("Arial", 12, "bold")
+            )
+            title_label.pack(pady=(0, 10))
+            
+            # 정보 라벨
+            info_label = ttk.Label(
+                main_frame,
+                text=f"입수온도: {water_temps[0]}~{water_temps[-1]}℃ (46개) | "
+                     f"외기온도: {outdoor_temps[0]}~{outdoor_temps[-1]}℃ (46개)",
+                font=("Arial", 9)
+            )
+            info_label.pack(pady=(0, 10))
+            
+            # 스크롤 가능한 프레임
+            scroll_frame = ttk.Frame(main_frame)
+            scroll_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Canvas와 Scrollbar 생성
+            canvas = tk.Canvas(scroll_frame, highlightthickness=0)
+            v_scrollbar = ttk.Scrollbar(scroll_frame, orient="vertical", command=canvas.yview)
+            h_scrollbar = ttk.Scrollbar(scroll_frame, orient="horizontal", command=canvas.xview)
+            
+            # 테이블 프레임
+            table_frame = ttk.Frame(canvas)
+            
+            # Canvas 설정
+            canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+            
+            # 스크롤바 배치
+            v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # 테이블 프레임을 Canvas에 배치
+            canvas_window = canvas.create_window((0, 0), window=table_frame, anchor="nw")
+            
+            # 테이블 생성
+            # 좌상단 빈 셀
+            corner_label = tk.Label(
+                table_frame,
+                text="입수↓ / 외기→",
+                font=("Arial", 8, "bold"),
+                bg="lightgray",
+                relief="solid",
+                borderwidth=1,
+                width=12,
+                height=2
+            )
+            corner_label.grid(row=0, column=0, sticky="nsew")
+            
+            # 외기온도 헤더 (가로, 첫 번째 행)
+            for col_idx, outdoor_temp in enumerate(outdoor_temps):
+                temp_label = tk.Label(
+                    table_frame,
+                    text=f"{outdoor_temp:.1f}℃",
+                    font=("Arial", 7, "bold"),
+                    bg="lightblue",
+                    relief="solid",
+                    borderwidth=1,
+                    width=8,
+                    height=2
+                )
+                temp_label.grid(row=0, column=col_idx+1, sticky="nsew")
+            
+            # 입수온도 헤더 (세로, 첫 번째 열) 및 테이블 데이터
+            for row_idx, water_temp in enumerate(water_temps):
+                # 입수온도 헤더
+                water_label = tk.Label(
+                    table_frame,
+                    text=f"{water_temp:.1f}℃",
+                    font=("Arial", 7, "bold"),
+                    bg="lightyellow",
+                    relief="solid",
+                    borderwidth=1,
+                    width=12,
+                    height=2
+                )
+                water_label.grid(row=row_idx+1, column=0, sticky="nsew")
+                
+                # 테이블 데이터
+                for col_idx, value in enumerate(table_values[row_idx]):
+                    value_label = tk.Label(
+                        table_frame,
+                        text=f"{int(value)}",
+                        font=("Arial", 7),
+                        bg="white",
+                        relief="solid",
+                        borderwidth=1,
+                        width=8,
+                        height=2
+                    )
+                    value_label.grid(row=row_idx+1, column=col_idx+1, sticky="nsew")
+            
+            # Canvas 크기 조정 이벤트
+            def on_frame_configure(event):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            
+            table_frame.bind("<Configure>", on_frame_configure)
+            
+            # 마우스 휠 스크롤 이벤트
+            def on_mousewheel(event):
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            
+            def on_shift_mousewheel(event):
+                canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+            
+            def bind_to_mousewheel(event):
+                canvas.bind_all("<MouseWheel>", on_mousewheel)
+                canvas.bind_all("<Shift-MouseWheel>", on_shift_mousewheel)
+            
+            def unbind_from_mousewheel(event):
+                canvas.unbind_all("<MouseWheel>")
+                canvas.unbind_all("<Shift-MouseWheel>")
+            
+            canvas.bind("<Enter>", bind_to_mousewheel)
+            canvas.bind("<Leave>", unbind_from_mousewheel)
+            
+            # 하단 버튼 프레임
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(pady=(10, 0))
+            
+            # 확인 버튼
+            ok_button = ttk.Button(
+                button_frame,
+                text="확인",
+                command=viewer.destroy,
+                width=15
+            )
+            ok_button.pack()
+            
+            self.log_communication("제빙테이블 뷰어 표시", "blue")
+            
+        except Exception as e:
+            messagebox.showerror("오류", f"제빙테이블 표시 중 오류 발생:\n{str(e)}")
+            self.log_communication(f"제빙테이블 뷰어 오류: {str(e)}", "red")
+    
+    def send_freezing_table_row(self, water_temp_idx):
+        """제빙테이블 특정 행을 CMD 0xB3으로 전송
+        
+        Args:
+            water_temp_idx: 입수온도 인덱스 (0~45)
+        
+        Returns:
+            bool: 전송 성공 여부
+        """
+        if not self.freezing_table_loaded or self.freezing_table_data is None:
+            self.log_communication("제빙테이블이 로드되지 않았습니다.", "red")
+            return False
+        
+        try:
+            table_data = self.freezing_table_data
+            water_temps = table_data['water_temps']
+            outdoor_temps = table_data['outdoor_temps']
+            table_rows = table_data['table_data']
+            
+            if water_temp_idx < 0 or water_temp_idx >= len(table_rows):
+                self.log_communication(f"잘못된 입수온도 인덱스: {water_temp_idx}", "red")
+                return False
+            
+            # DATA FIELD 생성 (93바이트)
+            # DATA1: 행 인덱스 (1바이트)
+            # DATA2~93: 테이블 데이터 46개 x 2바이트 = 92바이트
+            data_field = bytearray(93)
+            
+            # DATA1: 행 인덱스 (0~45)
+            data_field[0] = water_temp_idx
+            
+            # DATA2~DATA93: 테이블 데이터 46개 (B~AU열), 각 2바이트
+            for col_idx in range(46):
+                table_value = int(table_rows[water_temp_idx][col_idx])
+                # 범위 체크 (0~65535)
+                if table_value < 0:
+                    table_value = 0
+                elif table_value > 65535:
+                    table_value = 65535
+                
+                # 2바이트로 변환 (상위 바이트, 하위 바이트)
+                high_byte = (table_value >> 8) & 0xFF  # 상위 바이트
+                low_byte = table_value & 0xFF           # 하위 바이트
+                
+                # DATA2부터 시작, 각 값마다 2바이트 할당
+                data_field[1 + (col_idx * 2)] = high_byte      # 상위 바이트
+                data_field[1 + (col_idx * 2) + 1] = low_byte   # 하위 바이트
+            
+            # 패킷 구조 검증 로그
+            if self.debug_comm:
+                self.log_communication(
+                    f"[CMD 0xB3 패킷 검증]",
+                    "blue"
+                )
+                self.log_communication(
+                    f"  DATA FIELD 길이: {len(data_field)} 바이트 (예상: 93바이트)",
+                    "gray"
+                )
+                self.log_communication(
+                    f"  DATA1 (행 인덱스): {data_field[0]} (입수온도: {water_temps[water_temp_idx]}℃)",
+                    "gray"
+                )
+                
+                # 처음 3개 테이블 값 예시 로그
+                for i in range(min(3, 46)):
+                    idx = 1 + (i * 2)
+                    value = (data_field[idx] << 8) | data_field[idx + 1]
+                    self.log_communication(
+                        f"  DATA{idx+1}~{idx+2} (외기온도{outdoor_temps[i]}℃): 0x{data_field[idx]:02X} 0x{data_field[idx+1]:02X} = {value}ms",
+                        "gray"
+                    )
+                
+                if len(outdoor_temps) > 3:
+                    self.log_communication(f"  ... (중간 {len(outdoor_temps)-6}개 생략)", "gray")
+                
+                # 마지막 3개 테이블 값 예시 로그
+                for i in range(max(3, 46-3), 46):
+                    idx = 1 + (i * 2)
+                    value = (data_field[idx] << 8) | data_field[idx + 1]
+                    self.log_communication(
+                        f"  DATA{idx+1}~{idx+2} (외기온도{outdoor_temps[i]}℃): 0x{data_field[idx]:02X} 0x{data_field[idx+1]:02X} = {value}ms",
+                        "gray"
+                    )
+            
+            # CMD 0xB3 패킷 생성 (내부적으로 STX, TX_ID, CMD, DATA_LEN, CRC, ETX 추가)
+            # 최종 패킷 구조: STX(1) + TX_ID(1) + CMD(1) + DATA_LEN(1) + DATA_FIELD(93) + CRC_HIGH(1) + CRC_LOW(1) + ETX(1) = 100바이트
+            # Heartbeat는 제빙 STEP 22 감지 시 이미 일시 중지된 상태
+            success, message = self.comm.send_packet(0xB3, bytes(data_field))
+            
+            # 패킷 전송 후 대기 (전송 완료 대기)
+            time.sleep(0.2)  # 200ms
+            
+            water_temp = int(water_temps[water_temp_idx])
+            if success:
+                if self.debug_comm:
+                    self.log_communication(
+                        f"[자동] 제빙테이블 전송 성공: 입수온도 {water_temp}℃ (행 {water_temp_idx})",
+                        "green"
+                    )
+                    self.log_communication(
+                        f"  전송 패킷 총 길이: 100바이트 (STX(1) + TX_ID(1) + CMD(1) + LEN(1) + DATA(93) + CRC(2) + ETX(1))",
+                        "gray"
+                    )
+                return True
+            else:
+                if self.debug_comm:
+                    self.log_communication(
+                        f"[자동] 제빙테이블 전송 실패: 입수온도 {water_temp}℃ (행 {water_temp_idx}), {message}",
+                        "red"
+                    )
+                return False
+                
+        except Exception as e:
+            self.log_communication(f"제빙테이블 전송 오류: {str(e)}", "red")
+            return False
     
     def toggle_refrigerant_valve_target(self, event):
         """냉매전환밸브 목표 토글 (냉각->제빙->핫가스->냉각)"""
@@ -1679,21 +1913,33 @@ class MainGUI:
                                      command=self.toggle_connection)
         self.connect_btn.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
+        # 디버그 모드 체크박스
+        debug_frame = ttk.Frame(right_frame)
+        debug_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        self.debug_var = tk.BooleanVar(value=True)
+        debug_check = ttk.Checkbutton(
+            debug_frame, 
+            text="통신 디버그", 
+            variable=self.debug_var,
+            command=self.toggle_debug_mode
+        )
+        debug_check.pack(side=tk.LEFT)
+        
         # Log 추출 버튼
         self.log_export_btn = ttk.Button(right_frame, text="Log 추출",
                                         command=self.export_log,
                                         state="disabled")
-        self.log_export_btn.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        self.log_export_btn.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
         # Log 삭제 버튼
         self.log_clear_btn = ttk.Button(right_frame, text="Log 삭제",
                                        command=self.clear_log,
                                        state="disabled")
-        self.log_clear_btn.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        self.log_clear_btn.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
         # CMD 전송 버튼들 (0xA0 제외)
         cmd_frame = ttk.LabelFrame(right_frame, text="CMD 전송", padding="2")
-        cmd_frame.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
+        cmd_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
         self.cmd_buttons = {}
         cmds = [0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]  # 0xA0 제거
@@ -1716,6 +1962,14 @@ class MainGUI:
         if ports:
             self.port_combo.set(ports[0])
         self.log_communication(f"포트 새로고침: {len(ports)}개 포트 발견", "blue")
+    
+    def toggle_debug_mode(self):
+        """통신 디버그 모드 토글"""
+        self.debug_comm = self.debug_var.get()
+        if self.debug_comm:
+            self.log_communication("🔍 통신 디버그 모드 활성화 (RAW 데이터 표시)", "blue")
+        else:
+            self.log_communication("통신 디버그 모드 비활성화", "gray")
     
     # ============================================
     # 5. toggle_connection 메서드에 제빙 버튼 활성화 추가
@@ -1918,16 +2172,41 @@ class MainGUI:
             self.log_communication(f"CMD 전송 오류: {str(e)}", "red")
     
     def monitor_data(self):
-        """데이터 모니터링 스레드"""
+        """데이터 모니터링 스레드 - 디버깅 로그 포함"""
         while self.monitoring_active:
             received_data = self.comm.get_received_data()
             for msg_type, data in received_data:
                 if msg_type == 'PACKET':
+                    # 패킷 파싱 전 RAW 데이터 로깅
+                    if hasattr(self, 'debug_comm') and self.debug_comm:
+                        if 'tx_id' in data and 'cmd' in data:
+                            # 정상 패킷
+                            pass  # process_received_packet에서 처리
+                        else:
+                            # 파싱 오류 정보
+                            self.log_communication(
+                                f"[디버그] 패킷 파싱 정보: {data}",
+                                "orange"
+                            )
                     self.process_received_packet(data)
                 elif msg_type == 'SENT':
                     self.log_sent_data(data)
                 elif msg_type == 'ERROR':
-                    self.log_communication(f"오류: {data}", "red")
+                    self.log_communication(f"❌ 통신 오류: {data}", "red")
+                elif msg_type == 'RAW_DATA':
+                    # RAW 데이터 수신 로그 (Heartbeat 제외)
+                    if hasattr(self, 'debug_comm') and self.debug_comm:
+                        # Heartbeat 패킷인지 확인 (0x02 0xXX 0x0F ... 형태)
+                        raw_bytes = data.get('bytes', '')
+                        # "02 01 0F" 또는 "02 02 0F" 패턴이 있으면 heartbeat으로 간주
+                        is_heartbeat = ('02 01 0F' in raw_bytes or '02 02 0F' in raw_bytes)
+                        
+                        if not is_heartbeat:
+                            pass
+                            # self.log_communication(
+                            #     f"[수신 RAW] {data['bytes']} ({data['length']}바이트)",
+                            #     "purple"
+                            # )
             
             status_updates = self.comm.get_status_updates()
             for status_type, message in status_updates:
@@ -1940,8 +2219,47 @@ class MainGUI:
     # 7. process_received_packet에 CMD 0xB2 수신 처리 추가
     # ============================================
     def process_received_packet(self, packet_info):
-        """수신된 프로토콜 패킷 처리"""
+        """수신된 프로토콜 패킷 처리 - 성공/실패 로그 추가"""
         try:
+            # 패킷 파싱 에러 체크
+            if 'error' in packet_info:
+                # 파싱 실패
+                error_type = packet_info.get('error', 'UNKNOWN')
+                error_detail = packet_info.get('detail', '상세 정보 없음')
+                raw_data = packet_info.get('raw_data', '')
+                
+                # 에러 타입별 로그 색상 및 메시지
+                error_messages = {
+                    'INVALID_START': '❌ [1단계 실패] STX 확인 실패',
+                    'UNDEFINED_CMD': '❌ [2단계 실패] CMD 확인 실패',
+                    'ETX_POSITION_MISMATCH': '❌ [4단계 실패] ETX 위치 확인 실패',
+                    'CRC_MISMATCH': '❌ [4단계 실패] CRC 검증 실패',
+                    'PACKET_TOO_SHORT': '❌ 패킷 길이 부족',
+                    'LENGTH_MISMATCH': '❌ 패킷 길이 불일치',
+                    'INVALID_STX': '❌ STX 오류',
+                    'INVALID_ETX': '❌ ETX 오류',
+                    'PARSE_EXCEPTION': '❌ 파싱 예외'
+                }
+                
+                if self.debug_comm:
+                    error_msg = error_messages.get(error_type, f"❌ 패킷 수신 실패: {error_type}")
+                    self.log_communication(error_msg, "red")
+                    self.log_communication(f"   사유: {error_detail}", "orange")
+                    
+                    if raw_data:
+                        self.log_communication(f"   RAW: {raw_data}", "gray")
+                    
+                    # 버퍼 초기화 안내
+                    if error_type in ['INVALID_START', 'UNDEFINED_CMD', 'ETX_POSITION_MISMATCH', 'CRC_MISMATCH']:
+                        self.log_communication(f"   ⚠️  수신 버퍼 초기화됨", "orange")
+                
+                return
+            
+            # 정상 패킷
+            if 'tx_id' not in packet_info or 'cmd' not in packet_info:
+                self.log_communication("❌ 패킷 수신 실패: 필수 필드 누락", "red")
+                return
+            
             tx_id = packet_info['tx_id']
             cmd = packet_info['cmd']
             data_field = packet_info['data_field']
@@ -1955,14 +2273,18 @@ class MainGUI:
             if cmd == 0x0F:
                 # POLLING [메인 → PC] 상태응답 처리
                 if tx_id == 0x02:  # 메인 → PC
-                    self.log_communication(f"수신: {tx_name}, CMD 0x{cmd:02X} (상태응답), 데이터: {hex_data}", "green")
-                    self.process_status_response(data_field)
+                    if self.debug_comm:
+                        pass
+                        # self.log_communication(f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X} (상태응답)", "green")
+                        # self.log_communication(f"   데이터: {hex_data}", "gray")
+                    self.process_status_response(data_field, tx_id)
                 else:
                     # Heartbeat는 로그에서 제외
                     pass
             else:
-                log_msg = f"수신: {tx_name}, CMD 0x{cmd:02X}, 데이터: {hex_data}"
-                self.log_communication(log_msg, "green")
+                if self.debug_comm:
+                    log_msg = f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X}, 데이터: {hex_data}"
+                    self.log_communication(log_msg, "green")
             
             # CMD별 데이터 처리
             if cmd in [0xA0, 0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]:
@@ -1977,10 +2299,11 @@ class MainGUI:
                     self.cooling_data['operation_state'] = 'GOING' if cooling_operation == 1 else 'STOP'
                     self.cooling_data['on_temp'] = on_temp
                     
-                    self.log_communication(f"  냉각 데이터 수신: 목표 RPS={target_rps}, "
-                                        f"목표 온도={target_temp}℃, "
-                                        f"동작={'GOING' if cooling_operation == 1 else 'STOP'}, "
-                                        f"ON 온도={on_temp}℃", "gray")
+                    if self.debug_comm:
+                        self.log_communication(f"  냉각 데이터 수신: 목표 RPS={target_rps}, "
+                                            f"목표 온도={target_temp}℃, "
+                                            f"동작={'GOING' if cooling_operation == 1 else 'STOP'}, "
+                                            f"ON 온도={on_temp}℃", "gray")
                 
                 # CMD 0xB2 수신 처리 (제빙 제어 응답)
                 if cmd == 0xB2 and len(data_field) >= 7:
@@ -1996,9 +2319,10 @@ class MainGUI:
                     self.icemaking_data['swing_on_time'] = swing_on
                     self.icemaking_data['swing_off_time'] = swing_off
                     
-                    self.log_communication(f"  제빙 데이터 수신: 동작={self.icemaking_data['operation']}, "
-                                        f"시간={icemaking_time}ms, 용량={water_capacity}Hz, "
-                                        f"스윙 ON={swing_on}ms, OFF={swing_off}ms", "gray")
+                    if self.debug_comm:
+                        self.log_communication(f"  제빙 데이터 수신: 동작={self.icemaking_data['operation']}, "
+                                            f"시간={icemaking_time}ms, 용량={water_capacity}Hz, "
+                                            f"스윙 ON={swing_on}ms, OFF={swing_off}ms", "gray")
                 
                 try:
                     data_string = data_field.decode('utf-8', errors='ignore')
@@ -2009,17 +2333,140 @@ class MainGUI:
         except Exception as e:
             self.log_communication(f"패킷 처리 오류: {str(e)}", "red")
     
-    def process_status_response(self, data_field):
+    def process_status_response(self, data_field, tx_id=None):
         """CMD 0x0F (상태응답) 처리 - POLLING [메인 → PC]"""
         try:
             if not data_field or len(data_field) == 0:
                 return
             
-            # DATA1: 탱크커버 탈착상태 (0: OPEN)
+            # CMD 0x0F 응답에서 제빙테이블 자동 전송 확인
+            # DATA1: 외기온도 1, DATA2: 온수 입수온도, DATA3: 제빙 STEP
+            if len(data_field) >= 3:
+                outdoor_temp1 = data_field[0]     # DATA1: 외기온도 1 (센서류 섹션 매칭)
+                hot_inlet_temp = data_field[1]    # DATA2: 온수 입수온도 (센서류 섹션 매칭)
+                ice_step = data_field[2]          # DATA3: 제빙 STEP
+                
+                # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
+                if tx_id == 0x02:  # MAIN → PC
+                    # 센서 데이터에 업데이트 (float 타입으로 변환)
+                    self.sensor_data['outdoor_temp1'] = float(outdoor_temp1)
+                    self.sensor_data['hot_inlet_temp'] = float(hot_inlet_temp)
+                    
+                    # 업데이트 확인용 디버그 로그
+                    if self.debug_comm:
+                        pass
+                        # self.log_communication(
+                        #     f"[디버그] sensor_data 업데이트: outdoor_temp1={self.sensor_data['outdoor_temp1']}, hot_inlet_temp={self.sensor_data['hot_inlet_temp']}",
+                        #     "purple"
+                        # )
+                        
+                        # self.log_communication(
+                        #     f"✓ MAIN으로부터 데이터 수신 성공",
+                        #     "green"
+                        # )
+                        # self.log_communication(
+                        #     f"  DATA1 (외기온도1): {outdoor_temp1}℃ → [센서류] 외기온도 1에 반영",
+                        #     "cyan"
+                        # )
+                        # self.log_communication(
+                        #     f"  DATA2 (온수입수온도): {hot_inlet_temp}℃ → [센서류] 온수 입수온도에 반영",
+                        #     "cyan"
+                        # )
+                        # self.log_communication(
+                        #     f"  DATA3 (제빙 STEP): {ice_step}",
+                        #     "cyan"
+                        # )
+                else:
+                    # TX_ID가 MAIN_ID가 아닌 경우 경고
+                    device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
+                    tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
+                    self.log_communication(
+                        f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
+                        "orange"
+                    )
+                    return
+                
+                # DATA3(제빙 STEP)에 따른 Heartbeat 제어
+                if ice_step == 22:
+                    # 제빙 STEP이 22이면 Heartbeat 일시 중지
+                    if not self.comm.heartbeat_paused:
+                        self.comm.pause_heartbeat()
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  [제빙 STEP 22] Heartbeat 일시 중지",
+                                "orange"
+                            )
+                else:
+                    # 제빙 STEP이 22가 아니면 Heartbeat 재개
+                    if self.comm.heartbeat_paused:
+                        self.comm.resume_heartbeat()
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  [제빙 STEP {ice_step}] Heartbeat 재개",
+                                "orange"
+                            )
+                
+                # DATA3이 22(Decimal)이고, 제빙테이블이 로드되어 있으면 자동 전송
+                if ice_step == 22 and self.freezing_table_loaded and self.freezing_table_data is not None:
+                    if self.debug_comm:
+                        self.log_communication(
+                            f"  제빙 STEP이 22입니다. 제빙테이블 자동 전송을 시작합니다...",
+                            "purple"
+                        )
+                    
+                    # 입수온도(hot_inlet_temp)와 외기온도(outdoor_temp1)에 해당하는 행 찾기
+                    water_temps = self.freezing_table_data['water_temps']
+                    outdoor_temps = self.freezing_table_data['outdoor_temps']
+                    
+                    # 입수온도 인덱스 찾기 (가장 가까운 값) - DATA2 (온수 입수온도) 사용
+                    water_temp_idx = None
+                    min_diff = float('inf')
+                    for idx, temp in enumerate(water_temps):
+                        diff = abs(temp - hot_inlet_temp)
+                        if diff < min_diff:
+                            min_diff = diff
+                            water_temp_idx = idx
+                    
+                    if water_temp_idx is not None:
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행 {water_temp_idx} (테이블 입수온도: {water_temps[water_temp_idx]}℃) 선택",
+                                "cyan"
+                            )
+                        
+                        # 제빙테이블 전송 (send_freezing_table_row 내부에서 추가로 Heartbeat 제어)
+                        success = self.send_freezing_table_row(water_temp_idx)
+                        
+                        if self.debug_comm:
+                            if success:
+                                self.log_communication(
+                                    f"  제빙테이블 자동 전송 완료",
+                                    "green"
+                                )
+                            else:
+                                self.log_communication(
+                                    f"  제빙테이블 자동 전송 실패",
+                                    "red"
+                                )
+                    else:
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행을 찾을 수 없습니다.",
+                                "orange"
+                            )
+                elif ice_step == 22 and not self.freezing_table_loaded:
+                    if self.debug_comm:
+                        self.log_communication(
+                            f"  제빙 STEP이 22이지만 제빙테이블이 로드되지 않았습니다.",
+                            "orange"
+                        )
+            
+            # 기존 코드: DATA1: 탱크커버 탈착상태 (0: OPEN)
             if len(data_field) >= 1:
                 tank_cover = data_field[0]
                 tank_cover_status = "OPEN" if tank_cover == 0 else "CLOSE"
-                self.log_communication(f"  탱크커버 상태: {tank_cover_status} (0x{tank_cover:02X})", "gray")
+                # 제빙테이블 관련 로그와 중복되므로 주석 처리
+                # self.log_communication(f"  탱크커버 상태: {tank_cover_status} (0x{tank_cover:02X})", "gray")
             
             # DATA2~DATA5: NOS 밸브 상태 (1~5)
             if len(data_field) >= 5:
@@ -2066,7 +2513,7 @@ class MainGUI:
                         feed_states={i: self.feed_valve_states[i] for i in range(1, feed_count + 1)}
                     )
             
-            self.log_communication(f"  상태응답 처리 완료 (데이터 길이: {len(data_field)}바이트)", "gray")
+            # self.log_communication(f"  상태응답 처리 완료 (데이터 길이: {len(data_field)}바이트)", "gray")
             
         except Exception as e:
             self.log_communication(f"상태응답 처리 오류: {str(e)}", "red")
@@ -2081,27 +2528,111 @@ class MainGUI:
             stx = data[0]
             etx = data[-1]
             if stx != 0x02:
-                self.log_communication(f"경고: 전송 패킷의 STX가 올바르지 않습니다 (예상: 0x02, 실제: 0x{stx:02X})", "orange")
+                if self.debug_comm:
+                    self.log_communication(f"경고: 전송 패킷의 STX가 올바르지 않습니다 (예상: 0x02, 실제: 0x{stx:02X})", "orange")
             if etx != 0x03:
-                self.log_communication(f"경고: 전송 패킷의 ETX가 올바르지 않습니다 (예상: 0x03, 실제: 0x{etx:02X})", "orange")
+                if self.debug_comm:
+                    self.log_communication(f"경고: 전송 패킷의 ETX가 올바르지 않습니다 (예상: 0x03, 실제: 0x{etx:02X})", "orange")
             
             cmd = data[2]  # RX ID 제거로 인덱스 변경
+            data_len = data[3]  # DATA LENGTH
             
             # Heartbeat는 생략
             if cmd != 0x0F:
-                tx_id = data[1]
-                
-                device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
-                tx_name = device_names.get(tx_id, f"0x{tx_id:02X}")
-                
-                # 전체 패킷 HEX 출력 (STX와 ETX 포함)
-                hex_packet = " ".join([f"{b:02X}" for b in data])
-                log_msg = f"송신: {tx_name}, CMD 0x{cmd:02X} [STX: 0x{stx:02X}, ETX: 0x{etx:02X}]"
-                self.log_communication(log_msg, "blue")
-                self.log_communication(f"  전체 패킷 (HEX): {hex_packet}", "gray")
+                if self.debug_comm:
+                    tx_id = data[1]
+                    
+                    device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
+                    tx_name = device_names.get(tx_id, f"0x{tx_id:02X}")
+                    
+                    # 전체 패킷 길이 검증
+                    total_length = len(data)
+                    expected_length = 7 + data_len  # STX(1) + TX_ID(1) + CMD(1) + LEN(1) + DATA(N) + CRC(2) + ETX(1)
+                    
+                    log_msg = f"송신: {tx_name}, CMD 0x{cmd:02X}, 패킷 길이: {total_length}바이트"
+                    self.log_communication(log_msg, "blue")
+                    
+                    # CMD 0xB3의 경우 상세 검증
+                    if cmd == 0xB3:
+                        self.log_communication(
+                            f"  [CMD 0xB3 검증] DATA LENGTH: {data_len}바이트 (예상: 93바이트)",
+                            "cyan"
+                        )
+                        self.log_communication(
+                            f"  [CMD 0xB3 검증] 전체 패킷: {total_length}바이트 (예상: 100바이트)",
+                            "cyan"
+                        )
+                        
+                        if total_length != 100:
+                            self.log_communication(
+                                f"  ⚠️  경고: CMD 0xB3 패킷 길이 불일치! (예상: 100, 실제: {total_length})",
+                                "red"
+                            )
+                        
+                        if data_len != 93:
+                            self.log_communication(
+                                f"  ⚠️  경고: CMD 0xB3 DATA FIELD 길이 불일치! (예상: 93, 실제: {data_len})",
+                                "red"
+                            )
+                        
+                        # DATA FIELD 구조 확인
+                        if total_length >= 8:
+                            row_idx = data[4]  # DATA1: 행 인덱스
+                            self.log_communication(
+                                f"  DATA1 (행 인덱스): {row_idx}",
+                                "gray"
+                            )
+                            
+                            # 전체 DATA FIELD 출력 (STX(1) + TX_ID(1) + CMD(1) + LEN(1) 다음부터 CRC(2) + ETX(1) 전까지)
+                            if total_length > 7:
+                                data_field_bytes = data[4:total_length-3]  # DATA FIELD만 추출
+                                self.log_communication(
+                                    f"  [DATA FIELD 전체 ({len(data_field_bytes)}바이트)]",
+                                    "cyan"
+                                )
+                                
+                                # 10바이트씩 끊어서 출력
+                                for i in range(0, len(data_field_bytes), 10):
+                                    chunk = data_field_bytes[i:i+10]
+                                    hex_chunk = " ".join([f"{b:02X}" for b in chunk])
+                                    self.log_communication(
+                                        f"    [{i:3d}~{i+len(chunk)-1:3d}] {hex_chunk}",
+                                        "gray"
+                                    )
+                            
+                            # 처음 2개 테이블 값 확인
+                            if total_length >= 12:
+                                for i in range(2):
+                                    idx = 5 + (i * 2)
+                                    if idx + 1 < total_length - 3:  # ETX, CRC 제외
+                                        high = data[idx]
+                                        low = data[idx + 1]
+                                        value = (high << 8) | low
+                                        self.log_communication(
+                                            f"  DATA{idx-3}~{idx-2} (테이블값 {i+1}): 0x{high:02X} 0x{low:02X} = {value}",
+                                            "gray"
+                                        )
+                    else:
+                        self.log_communication(
+                            f"  DATA LENGTH: {data_len}바이트, 패킷 구조: STX(1) + TX_ID(1) + CMD(1) + LEN(1) + DATA({data_len}) + CRC(2) + ETX(1)",
+                            "gray"
+                        )
+                    
+                    # 전체 패킷 HEX 출력 (CMD 0xB3가 아닌 경우만, CMD 0xB3는 너무 길어서 생략)
+                    if cmd != 0xB3:
+                        hex_packet = " ".join([f"{b:02X}" for b in data])
+                        self.log_communication(f"  전체 패킷 (HEX): {hex_packet}", "gray")
+                    else:
+                        # CMD 0xB3는 첫 10바이트와 마지막 10바이트만 표시
+                        hex_start = " ".join([f"{b:02X}" for b in data[:10]])
+                        hex_end = " ".join([f"{b:02X}" for b in data[-10:]])
+                        self.log_communication(f"  패킷 시작 (10B): {hex_start}", "gray")
+                        self.log_communication(f"  ... (중간 {total_length-20}바이트 생략)", "gray")
+                        self.log_communication(f"  패킷 끝 (10B): {hex_end}", "gray")
         
-        except Exception:
-            pass
+        except Exception as e:
+            if self.debug_comm:
+                self.log_communication(f"송신 로그 오류: {str(e)}", "red")
     
     def parse_and_update_data(self, data_string):
         """수신 데이터 파싱 및 업데이트"""
@@ -2326,7 +2857,12 @@ class MainGUI:
         for sensor_key, value in self.sensor_data.items():
             if sensor_key in self.sensor_labels:
                 label = self.sensor_labels[sensor_key]
-                label.config(text=f"{value:.1f}")
+                try:
+                    # 숫자 타입으로 변환하여 표시
+                    numeric_value = float(value) if value is not None else 0.0
+                    label.config(text=f"{numeric_value:.1f}")
+                except (ValueError, TypeError):
+                    label.config(text="0.0")
         
         # # 공조시스템 상태 업데이트
         # for hvac_key, value in self.hvac_data.items():

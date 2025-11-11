@@ -6,11 +6,11 @@
  * Copyright    : Coway_Electronics Engineering Team (DH,Kim)
  * Description  :
  ***********************************************************************************************************************/
-/* 250us ¸ÞÀÎ ³»ºÎ ÀÎÅÍ·´Æ® Å¸ÀÌ¸Ó */
+/* 250us ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Í·ï¿½Æ® Å¸ï¿½Ì¸ï¿½ */
 #pragma interrupt INTTM00 INTTM00
-/* È÷ÅÍ */
+/* ï¿½ï¿½ï¿½ï¿½ */
 #pragma interrupt INTTM01 INTTM01
-/* 500us ½ºÅÜ¸ðÅÍ, ³ÃÀüÀüÈ¯¹ëºê, Æ®¶óÀÌ¾Ç Á¦¾î Å¸ÀÌ¸Ó */
+/* 500us ï¿½ï¿½ï¿½Ü¸ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¯ï¿½ï¿½ï¿½, Æ®ï¿½ï¿½ï¿½Ì¾ï¿½ ï¿½ï¿½ï¿½ï¿½ Å¸ï¿½Ì¸ï¿½ */
 #pragma interrupt INTTM02 INTTM02
 
 // #pragma interrupt INTTM13 INTTM13
@@ -20,30 +20,30 @@
 /*#pragma interrupt INTP4 INTP4*/
 /*#pragma interrupt INTP7 INTP7*/
 
-/* À¯·®¼¾¼­ ¿ÜºÎ ÀÎÅÍ·´Æ® */
+/* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Üºï¿½ ï¿½ï¿½ï¿½Í·ï¿½Æ® */
 #pragma interrupt INTP11 INTP11
 
-/* Main - Front Uart Åë½Å */
+/* Main - Front Uart ï¿½ï¿½ï¿½ */
 #pragma interrupt INTST0 INTST0
 #pragma interrupt INTSR0 INTSR0
 #pragma interrupt INTSRE0 INTSRE0
 
-/* Main - WIFI Uart Åë½Å */
+/* Main - WIFI Uart ï¿½ï¿½ï¿½ */
 #pragma interrupt INTST1 INTST1
 #pragma interrupt INTSR1 INTSR1
 #pragma interrupt INTSRE1 INTSRE1
 
-/* Main - BLDC Comp Uart Åë½Å */
+/* Main - BLDC Comp Uart ï¿½ï¿½ï¿½ */
 #pragma interrupt INTST2 INTST2
 #pragma interrupt INTSR2 INTSR2
 #pragma interrupt INTSRE2 INTSRE2
 
-/* °øÀå ÀÚµ¿È­°Ë»ç Uart Åë½Å */
+/* ï¿½ï¿½ï¿½ï¿½ ï¿½Úµï¿½È­ï¿½Ë»ï¿½ Uart ï¿½ï¿½ï¿½ */
 #pragma interrupt INTST3 INTST3
 #pragma interrupt INTSR3 INTSR3
 #pragma interrupt INTSRE3 INTSRE3
 
-/* RTC, EEPROM Module I2C Åë½Å */
+/* RTC, EEPROM Module I2C ï¿½ï¿½ï¿½ */
 #pragma interrupt INTIICA0 INTIICA0
 /***********************************************************************************************************************/
 #include "Macrodriver.h"
@@ -115,7 +115,7 @@ __interrupt void INTTM02(void) /* 500us */
     {
         /*2ms*/
         u8MotorCnt_2ms = 0;
-        /*..hui [23-9-18¿ÀÈÄ 5:21:46] ³Ã¼ö ¹Í½Ì¸ðÅÍ »èÁ¦..*/
+        /*..hui [23-9-18ï¿½ï¿½ï¿½ï¿½ 5:21:46] ï¿½Ã¼ï¿½ ï¿½Í½Ì¸ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½..*/
         /*HAL_ControlMixMotor();*/
         HAL_ControlFlowMotor(); // 500pps
     }
@@ -126,7 +126,7 @@ __interrupt void INTTM02(void) /* 500us */
         /*3ms*/
         u8MotorCnt_3ms = 0;
 
-        /*..hui [17-11-30¿ÀÀü 11:23:40] Door ½ºÅÜ ¸ðÅÍ..*/
+        /*..hui [17-11-30ï¿½ï¿½ï¿½ï¿½ 11:23:40] Door ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½..*/
         motor_ice_select_output(); // 333ps
         motor_ice_door_output();   // 333ps?
     }
@@ -137,7 +137,7 @@ __interrupt void INTTM02(void) /* 500us */
         /*5ms*/
         u8MotorCnt_5ms = 0;
 
-        /* Æ®·¹ÀÌ Á¦¾î ¼Óµµ º¯°æ mini¿Í µ¿ÀÏÇÏ°Ô 250715 CH.PARK */
+        /* Æ®ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Óµï¿½ ï¿½ï¿½ï¿½ï¿½ miniï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï°ï¿½ 250715 CH.PARK */
         control_ice_tray_motor();   // 166ps
 
     }
@@ -158,11 +158,11 @@ __interrupt void INTTM02(void) /* 500us */
         /*3ms*/
         u8MotorCnt_30ms = 0;
 
-        /*..hui [19-7-24¿ÀÀü 11:21:59] ³Ã¸ÅÀüÈ¯¹ëºê..*/
+        /*..hui [19-7-24ï¿½ï¿½ï¿½ï¿½ 11:21:59] ï¿½Ã¸ï¿½ï¿½ï¿½È¯ï¿½ï¿½ï¿½..*/
         StepMotorTimerInterrupt();
 
         #ifdef __DUMMY_PROGRAM__
-        /*..hui [19-7-17¿ÀÈÄ 3:24:58] À¯·®¼¾¼­..*/
+        /*..hui [19-7-17ï¿½ï¿½ï¿½ï¿½ 3:24:58] ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½..*/
         INTP11_Flow_Sensor_Input();
         #endif
     }
@@ -198,7 +198,7 @@ __interrupt void INTTM13 ( void )
 __interrupt void INTP4 (void)
 {
     //
-    /*..hui [18-8-9¿ÀÈÄ 5:28:35] TDS INPUT..*/
+    /*..hui [18-8-9ï¿½ï¿½ï¿½ï¿½ 5:28:35] TDS INPUT..*/
     INTP4_TDS_Input();
 }
 #endif
@@ -211,7 +211,7 @@ __interrupt void INTP4 (void)
 __interrupt void INTP7 (void)
 {
     //
-    /*..hui [19-7-17¿ÀÈÄ 3:24:58] ÇÊÅÍ À¯·®¼¾¼­..*/
+    /*..hui [19-7-17ï¿½ï¿½ï¿½ï¿½ 3:24:58] ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½..*/
     INTP7_Filter_Flow_Sensor_Input();
 }
 #endif
@@ -222,7 +222,7 @@ __interrupt void INTP7 (void)
 __interrupt void INTP11(void)
 {
     #ifndef __DUMMY_PROGRAM__
-    /*..hui [19-7-17¿ÀÈÄ 3:24:58] À¯·®¼¾¼­..*/
+    /*..hui [19-7-17ï¿½ï¿½ï¿½ï¿½ 3:24:58] ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½..*/
     INTP11_Flow_Sensor_Input();
     #endif
 }
@@ -439,7 +439,7 @@ __interrupt void INTST3(void)
  ***********************************************************************************************************************/
 __interrupt void INTSR3(void)
 {
-    if (gu8_test_mode_timeout_1s == 0 && u8FactoryTestMode == NONE_TEST_MODE)
+    if (gu8_test_mode_timeout_1s == 0 && u8FactoryTestMode == NONE _TEST_MODE)
     {
         // Uart_ISR3_PC_Rx();
     }

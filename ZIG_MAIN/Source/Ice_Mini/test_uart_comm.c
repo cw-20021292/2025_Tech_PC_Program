@@ -10,7 +10,8 @@
 #include    "Global_Variable.h"
 #include    "Port_Define.h"
 #include    "test_uart_comm.h"
-
+#include    "M8_Ice_Making.h"
+#include    "M9_Front_Communication.h"
 
 void AT_UART_Communication(void);
 void AT_UART_Rx_Process(void);
@@ -18,16 +19,13 @@ void AT_UART_Tx_Process(void);
 void int_UART3_AT_TX(void);
 void int_UART3_WORK_RX(void);
 
-
-
-
 bit AT_F_TxStart;             //
 bit AT_F_RxComplete;          //
 bit AT_F_Rx_NG;               //
 
 U8 AT_gu8TX_ERROR;
-U8 AT_gu8TxData[70];
-U8 AT_gu8RxData[70];
+U8 AT_gu8TxData[255];
+U8 AT_gu8RxData[255];
 U8 AT_gu8TxdCounter;
 U8 AT_gu8UARTStateMode;
 U8 AT_gu8RxdCounter;
@@ -43,15 +41,14 @@ U8 gu8_uart_test_mode;
 U8 gu8_uart_comp_start;
 U8 gu8_uart_comp_rps;
 
-extern U8 u8Freezing_Table_Used;
-// U16 gu16Temp_MakeTime[46][46];
+
 /***********************************************************************************************************************
 * Function Name: System_ini
 * Description  :
 ***********************************************************************************************************************/
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
-//                    (1) UART ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½
+//                    (1) UART ï¿½ï¿½ï¿? ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 void AT_UART_Communication(void)
@@ -68,7 +65,7 @@ void AT_UART_Communication(void)
 // ID         : ATUO TEST_Rx_Process
 // ï¿½ï¿½ï¿½ï¿½         : ï¿½Úµï¿½È­ ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½Åºï¿½
 //----------------------------------------------------------------------------
-// ï¿½ï¿½ï¿½       : ï¿½Úµï¿½È­ ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½Åºï¿½ Ã³ï¿½ï¿½
+// ï¿½ï¿½ï¿?       : ï¿½Úµï¿½È­ ï¿½×½ï¿½Æ® ï¿½ï¿½ï¿½Åºï¿½ Ã³ï¿½ï¿½
 //
 //----------------------------------------------------------------------------
 //""SUBR COMMENT END""********************************************************
@@ -78,7 +75,8 @@ void AT_UART_Communication(void)
 void AT_UART_Rx_Process(void)
 {
     U8 u8cmd = 0;
-    if(AT_F_RxComplete != SET)
+
+    if(AT_F_RxComplete == CLEAR)
     {
         return;
     }
@@ -92,51 +90,49 @@ void AT_UART_Rx_Process(void)
     // WORK_CMD ì²˜ë¦¬
     switch( u8cmd )
     {
-        case WORK_CMD_HEARTBEAT:                    // 0x0F: í•˜íŠ¸ë¹„íŠ¸ ìš”ì²­
-            // í•˜íŠ¸ë¹„íŠ¸ ì‘ë‹µ ì²˜ë¦¬
+        case WORK_CMD_HEARTBEAT:                    // 0x0F: ?•˜?Š¸ë¹„íŠ¸ ?š”ì²?
+            // ?•˜?Š¸ë¹„íŠ¸ ?‘?‹µ ì²˜ë¦¬
             break;
 
-        case WORK_CMD_POLLING:                      // 0xF0: ìƒíƒœì¡°íšŒ (POLLING) ìš”ì²­
-            // í´ë§ ë°ì´í„° ì‘ë‹µ ì²˜ë¦¬
+        case WORK_CMD_VALVE_CHANGE:                 // 0xA0: ë°¸ë¸Œ ë¶??•˜ ë³?ê²? ?š”ì²?
+            // ë°¸ë¸Œ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_VALVE_CHANGE:                 // 0xA0: ë°¸ë¸Œ ë¶€í•˜ ë³€ê²½ ìš”ì²­
-            // ë°¸ë¸Œ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_DRAIN_PUMP_CHANGE:            // 0xA1: ?“œ? ˆ?¸ ?Œ?”„ ì¶œë ¥ ë³?ê²? ?š”ì²?
+            // ?“œ? ˆ?¸ ?Œ?”„ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_DRAIN_PUMP_CHANGE:            // 0xA1: ë“œë ˆì¸ íŒí”„ ì¶œë ¥ ë³€ê²½ ìš”ì²­
-            // ë“œë ˆì¸ íŒí”„ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_COOLING_SYSTEM_CHANGE:        // 0xB0: ê³µì¡°?‹œ?Š¤?…œ ë³?ê²? ?š”ì²?
+            // ê³µì¡°?‹œ?Š¤?…œ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_COOLING_SYSTEM_CHANGE:        // 0xB0: ê³µì¡°ì‹œìŠ¤í…œ ë³€ê²½ ìš”ì²­
-            // ê³µì¡°ì‹œìŠ¤í…œ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_COOLING_RUN_CHANGE:           // 0xB1: ?ƒ‰ê°ìš´? „ ë³?ê²? ?š”ì²?
+            // ?ƒ‰ê°ìš´? „ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_COOLING_RUN_CHANGE:           // 0xB1: ëƒ‰ê°ìš´ì „ ë³€ê²½ ìš”ì²­
-            // ëƒ‰ê°ìš´ì „ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_FREEZING_RUN_CHANGE:          // 0xB2: ? œë¹™ìš´? „ ë³?ê²? ?š”ì²?
+            // ? œë¹™ìš´? „ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_FREEZING_RUN_CHANGE:          // 0xB2: ì œë¹™ìš´ì „ ë³€ê²½ ìš”ì²­
-            // ì œë¹™ìš´ì „ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_FREEZING_TABLE_CHANGE:        // 0xB3: ? œë¹™í…Œ?´ë¸? ë³?ê²? ?š”ì²?
+            SetFreezingTable(&AT_gu8RxData[5]);
+            SetUsedFreezingTable(SET);
             break;
 
-        case WORK_CMD_FREEZING_TABLE_CHANGE:        // 0xB3: ì œë¹™í…Œì´ë¸” ë³€ê²½ ìš”ì²­
-            // ì œë¹™í…Œì´ë¸” ë³€ê²½ ì²˜ë¦¬
-            
+        case WORK_CMD_COOLING_TABLE_CHANGE:         // 0xB4: ë³´ëƒ‰?š´? „ ë³?ê²? ?š”ì²?
+            // ë³´ëƒ‰?š´? „ ë³?ê²? ì²˜ë¦¬
             break;
 
-        case WORK_CMD_COOLING_TABLE_CHANGE:         // 0xB4: ë³´ëƒ‰ìš´ì „ ë³€ê²½ ìš”ì²­
-            // ë³´ëƒ‰ìš´ì „ ë³€ê²½ ì²˜ë¦¬
-            break;
-
-        case WORK_CMD_SENSOR_CHANGE:                // 0xC0: ì„¼ì„œê°’ ë³€ê²½ ìš”ì²­
-            // ì„¼ì„œê°’ ë³€ê²½ ì²˜ë¦¬
+        case WORK_CMD_SENSOR_CHANGE:                // 0xC0: ?„¼?„œê°? ë³?ê²? ?š”ì²?
+            // ?„¼?„œê°? ë³?ê²? ì²˜ë¦¬
             break;
 
         default:
-            // ì•Œ ìˆ˜ ì—†ëŠ” ëª…ë ¹
+            // ?•Œ ?ˆ˜ ?—†?Š” ëª…ë ¹
             break;
     }
+
+    AT_F_TxStart = SET;
 }
 
 
@@ -149,10 +145,9 @@ void AT_UART_Rx_Process(void)
 //------------------------
 void AT_UART_Tx_Process(void)
 {
-    static U8  AT_mu8Temp_Data1, AT_mu8Temp_Data2, AT_mu8Temp_Data3, gu8UARTAddr;
-    static U16 AT_mu16Temp_Data;
+    U16 mu16_cal_crc = 0;
 
-    if(AT_F_TxStart != SET)
+    if(AT_F_TxStart == CLEAR)
     {
         return;
     }
@@ -161,9 +156,22 @@ void AT_UART_Tx_Process(void)
         AT_F_TxStart = 0;
     }
 
-    AT_gu8TxData[0] = AT_RS232_STX;
-    TXD3 = AT_gu8TxData[AT_gu8TxdCounter];               // Ã¹ï¿½ï¿½Â° ï¿½ï¿½ï¿½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    AT_gu8TxData[0] = WORK_STX;
+    AT_gu8TxData[1] = WORK_ID_MAIN;
+    AT_gu8TxData[2] = WORK_CMD_HEARTBEAT;
+    AT_gu8TxData[3] = WORK_CMD_HEARTBEAT_LENGTH;
 
+    /* Datafield */
+    AT_gu8TxData[4] = gu8_Amb_Front_Temperature_One_Degree;     // ?™¸ê¸°ì˜¨?„
+    AT_gu8TxData[5] = gu8_Room_Temperature_One_Degree;          // ?…?ˆ˜?˜¨?„
+    AT_gu8TxData[6] = GetIceStep();                               // ? œë¹? Step
+
+    mu16_cal_crc = Rx_CRC_CCITT(AT_gu8TxData, 7);
+    AT_gu8TxData[7] = (U8)HighByte(mu16_cal_crc);
+    AT_gu8TxData[8] = (U8)LowByte(mu16_cal_crc);
+    AT_gu8TxData[9] = WORK_ETX;
+
+    TXD3 = AT_gu8TxData[AT_gu8TxdCounter];               // Ã¹ï¿½ï¿½Â° ï¿½ï¿½ï¿½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     AT_gu8TxdCounter++;
 
     F_AT_TX_Finish = 1;
@@ -191,14 +199,14 @@ void int_UART3_AT_TX(void)
         // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Í·ï¿½ ï¿½Ä¿ï¿½ ï¿½Ù·ï¿½ ï¿½ï¿½ï¿½ï¿½
         TXD3 = AT_gu8TxData[AT_gu8TxdCounter];
 
-        if(AT_gu8TxData[AT_gu8TxdCounter] == 0x04)        // ï¿½Û½Å¿Ï·ï¿½
+        if(AT_gu8TxdCounter < ((WORK_PACKET_BASIC_LENGTH + WORK_CMD_HEARTBEAT_LENGTH - 1)))
         {
-            AT_gu8TxdCounter = 0;                          // ETX ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Ä«ï¿½ï¿½Æ® ï¿½Ê±ï¿½È­
-            F_AT_TX_Finish = 0;
+            AT_gu8TxdCounter++;
         }
         else
         {
-            AT_gu8TxdCounter++;
+            AT_gu8TxdCounter = 0;
+            F_AT_TX_Finish = 0;
         }
     }
 }
@@ -210,9 +218,13 @@ void int_UART3_AT_TX(void)
 //------------------------------------------------------------------------------
 //                      UART RXD (INTSR1) - AutoTest
 //------------------------------------------------------------------------------
+U16 u16RxDataDebug;
+
 void int_UART3_WORK_RX(void)
 {
     U8 err_type03;
+    U16 mu16_cal_crc;
+    mu16_cal_crc = 0;
 
     err_type03 = (U8)(SSR13 & 0x0007);
     SIR13 = (U16)err_type03;
@@ -221,7 +233,7 @@ void int_UART3_WORK_RX(void)
 
     switch(AT_gu8UARTStateMode)
     {
-        // ï¿½ï¿½ï¿½
+        // ï¿½ï¿½ï¿?
         case UART_MODE_IDLE:
 
              if(gu8RxdBufferData == WORK_STX)
@@ -239,22 +251,56 @@ void int_UART3_WORK_RX(void)
 
          // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         case UART_MODE_RECEIVE:
+            AT_gu8RxData[AT_gu8RxdCounter++] = gu8RxdBufferData;
 
-             if(gu8RxdBufferData == WORK_ETX)
-             {                 // ETX check 0x04
-                 AT_gu8RxData[AT_gu8RxdCounter] = gu8RxdBufferData;
-                AT_F_RxComplete = 1;                                // ï¿½ï¿½ï¿½Å¿Ï·ï¿½
+            // ETX¸¦ ¹Ş¾ÒÀ» ¶§ CRC °ËÁõ
+            if(gu8RxdBufferData == WORK_ETX)
+            {
+                // ÃÖ¼Ò ÆĞÅ¶ ±æÀÌ È®ÀÎ: STX(1) + TX_ID(1) + CMD(1) + LEN(1) + CRC_HIGH(1) + CRC_LOW(1) + ETX(1) = 7¹ÙÀÌÆ®
+                if(AT_gu8RxdCounter >= 7)
+                {
+                    // ÆĞÅ¶ ±æÀÌ È®ÀÎ
+                    u16RxDataDebug = (AT_gu8RxData[3] + WORK_PACKET_BASIC_LENGTH);
+                    if(AT_gu8RxdCounter == (AT_gu8RxData[3] + WORK_PACKET_BASIC_LENGTH))
+                    {
+                        mu16_cal_crc = Rx_CRC_CCITT(AT_gu8RxData, (AT_gu8RxdCounter-3));
 
-                // Rx data initialize //
-                AT_gu8RxdCounter = 0;
-                 AT_gu8UARTStateMode = UART_MODE_IDLE;
-             }
-             else
-             {
-                 AT_gu8RxData[AT_gu8RxdCounter++] = gu8RxdBufferData;// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
-             }
+                        // CRC_HIGH¿Í CRC_LOW ºñ±³
+                        if(AT_gu8RxData[AT_gu8RxdCounter-3] == (U8)HighByte(mu16_cal_crc)
+                        && AT_gu8RxData[AT_gu8RxdCounter-2] == (U8)LowByte(mu16_cal_crc))
+                        {
+                            if(AT_gu8RxData[2] == 0xB3)
+                            {
+                                AT_gu8RxdCounter = 0;
+                            }
 
-             break;
+                            AT_F_RxComplete = 1;
+                            // Rx data initialize
+                            AT_gu8RxdCounter = 0;
+                            AT_gu8UARTStateMode = UART_MODE_IDLE;
+                        }
+                        else
+                        {
+                            // CRC ºÒÀÏÄ¡: ¹öÆÛ ÃÊ±âÈ­ÇÏ°í IDLE ¸ğµå·Î ÀüÈ¯
+                            AT_F_RxComplete = 0;
+                            AT_gu8RxdCounter = 0;
+                            AT_gu8UARTStateMode = UART_MODE_IDLE;
+                        }
+                    }
+                    else
+                    {
+
+                    }
+                }
+                else
+                {
+                    // ÆĞÅ¶ ±æÀÌ ºÎÁ·: ¹öÆÛ ÃÊ±âÈ­ÇÏ°í IDLE ¸ğµå·Î ÀüÈ¯
+                    AT_F_RxComplete = 0;
+                    AT_gu8RxdCounter = 0;
+                    AT_gu8UARTStateMode = UART_MODE_IDLE;
+                }
+            }
+            break;
 
         // Error
         case UART_MODE_ERROR:

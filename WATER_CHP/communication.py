@@ -137,9 +137,13 @@ class ProtocolHandler:
         return self.create_packet(tx_id, 0x0F)
     
     def parse_packet(self, packet_data):
-        """패킷 파싱 (RX ID 제거)"""
+        """패킷 파싱 (RX ID 제거) - 에러 정보 포함"""
         if len(packet_data) < 7:  # 최소 패킷 크기 (RX ID 제거로 1바이트 감소)
-            return None
+            return {
+                'error': 'PACKET_TOO_SHORT',
+                'detail': f'패킷 길이 부족: {len(packet_data)}바이트 (최소 7바이트 필요)',
+                'raw_data': ' '.join([f'{b:02X}' for b in packet_data])
+            }
         
         try:
             stx = packet_data[0]
@@ -150,7 +154,14 @@ class ProtocolHandler:
             expected_total = 6 + data_length  # STX + TX_ID + CMD + LEN + DATA + CRC16 + ETX
             
             if len(packet_data) != expected_total:
-                return None
+                return {
+                    'error': 'LENGTH_MISMATCH',
+                    'detail': f'패킷 길이 불일치: 예상 {expected_total}바이트, 실제 {len(packet_data)}바이트 (DATA_LEN={data_length})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in packet_data]),
+                    'stx': f'0x{stx:02X}',
+                    'tx_id': f'0x{tx_id:02X}',
+                    'cmd': f'0x{cmd:02X}'
+                }
             
             data_field = packet_data[4:4+data_length]
             # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
@@ -159,17 +170,37 @@ class ProtocolHandler:
             crc_received = (crc_high << 8) | crc_low
             etx = packet_data[-1]
             
-            # 검증
-            if stx != self.STX or etx != self.ETX:
-                return None
+            # STX 검증
+            if stx != self.STX:
+                return {
+                    'error': 'INVALID_STX',
+                    'detail': f'잘못된 STX: 0x{stx:02X} (예상: 0x{self.STX:02X})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in packet_data])
+                }
+            
+            # ETX 검증
+            if etx != self.ETX:
+                return {
+                    'error': 'INVALID_ETX',
+                    'detail': f'잘못된 ETX: 0x{etx:02X} (예상: 0x{self.ETX:02X})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in packet_data])
+                }
             
             # CRC 검증
             crc_data = packet_data[:-3]  # STX ~ DATA FIELD
             crc_calculated = self.calculate_crc16(crc_data)
             
             if crc_received != crc_calculated:
-                return None
+                return {
+                    'error': 'CRC_MISMATCH',
+                    'detail': f'CRC 불일치: 수신 0x{crc_received:04X}, 계산 0x{crc_calculated:04X}',
+                    'raw_data': ' '.join([f'{b:02X}' for b in packet_data]),
+                    'tx_id': f'0x{tx_id:02X}',
+                    'cmd': f'0x{cmd:02X}',
+                    'data_field': ' '.join([f'{b:02X}' for b in data_field])
+                }
             
+            # 성공
             return {
                 'tx_id': tx_id,
                 'cmd': cmd,
@@ -178,50 +209,120 @@ class ProtocolHandler:
                 'crc': crc_received
             }
             
-        except Exception:
-            return None
+        except Exception as e:
+            return {
+                'error': 'PARSE_EXCEPTION',
+                'detail': f'파싱 중 예외 발생: {str(e)}',
+                'raw_data': ' '.join([f'{b:02X}' for b in packet_data])
+            }
     
     def process_received_data(self, new_data):
-        """수신 버퍼에서 패킷 추출"""
+        """수신 버퍼에서 패킷 추출 - 엄격한 프로토콜 검증"""
         self.receive_buffer.extend(new_data)
         packets = []
         
         while len(self.receive_buffer) > 0:
-            # STX 찾기
-            stx_index = -1
-            for i in range(len(self.receive_buffer)):
-                if self.receive_buffer[i] == self.STX:
-                    stx_index = i
-                    break
-            
-            if stx_index == -1:
+            # 1단계: STX(0x02) 확인 - 첫 바이트가 STX가 아니면 버퍼 초기화
+            if self.receive_buffer[0] != self.STX:
+                invalid_byte = self.receive_buffer[0]
+                buffer_preview = self.receive_buffer[:min(10, len(self.receive_buffer))]
+                packets.append({
+                    'error': 'INVALID_START',
+                    'detail': f'통신 시작 오류: 첫 바이트가 STX(0x02)가 아님 (수신: 0x{invalid_byte:02X})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in buffer_preview])
+                })
+                # 버퍼 초기화
                 self.receive_buffer.clear()
                 break
             
-            # STX 이전 데이터 제거
-            if stx_index > 0:
-                self.receive_buffer = self.receive_buffer[stx_index:]
-            
-            # 최소 헤더 크기 확인 (STX + TX + RX + CMD + LEN)
-            if len(self.receive_buffer) < 5:
+            # 최소 헤더 크기 확인 (STX + TX_ID + CMD + DATA_LEN = 4바이트)
+            if len(self.receive_buffer) < 4:
+                # 아직 헤더가 다 안 옴, 대기
                 break
             
-            data_length = self.receive_buffer[4]
+            # 2단계: CMD 확인 - 세 번째 데이터가 정의된 CMD인지 확인
+            stx = self.receive_buffer[0]
+            tx_id = self.receive_buffer[1]
+            cmd = self.receive_buffer[2]
+            data_length = self.receive_buffer[3]
+            
+            if cmd not in self.CMD_LENGTH_MAP:
+                buffer_preview = self.receive_buffer[:min(10, len(self.receive_buffer))]
+                packets.append({
+                    'error': 'UNDEFINED_CMD',
+                    'detail': f'정의되지 않은 CMD: 0x{cmd:02X} (TX_ID: 0x{tx_id:02X})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in buffer_preview])
+                })
+                # 버퍼 초기화
+                self.receive_buffer.clear()
+                break
+            
+            # 3단계: DATA_LENGTH로 전체 패킷 길이 계산
+            # 패킷 구조: STX(1) + TX_ID(1) + CMD(1) + DATA_LEN(1) + DATA(N) + CRC_HIGH(1) + CRC_LOW(1) + ETX(1)
+            # 전체 길이 = 4 + DATA_LEN + 3 = 7 + DATA_LEN
             expected_total = 7 + data_length
             
+            # CRC와 ETX 위치 예상
+            crc_high_pos = 4 + data_length
+            crc_low_pos = 5 + data_length
+            etx_pos = 6 + data_length
+            
+            # 패킷이 완전히 도착했는지 확인
             if len(self.receive_buffer) < expected_total:
+                # 아직 패킷이 다 안 옴, 대기
                 break
             
-            # 패킷 추출 시도
-            packet_candidate = bytes(self.receive_buffer[:expected_total])
-            parsed = self.parse_packet(packet_candidate)
+            # 4단계: ETX 위치 확인
+            actual_etx = self.receive_buffer[etx_pos]
+            if actual_etx != self.ETX:
+                packets.append({
+                    'error': 'ETX_POSITION_MISMATCH',
+                    'detail': f'ETX 위치 오류: 예상 위치[{etx_pos}]에 ETX(0x03) 없음 (수신: 0x{actual_etx:02X})',
+                    'raw_data': ' '.join([f'{b:02X}' for b in self.receive_buffer[:expected_total]]),
+                    'expected_length': expected_total,
+                    'cmd': f'0x{cmd:02X}',
+                    'data_length': data_length
+                })
+                # 버퍼 초기화
+                self.receive_buffer.clear()
+                break
             
-            if parsed:
-                packets.append(parsed)
-                self.receive_buffer = self.receive_buffer[expected_total:]
-            else:
-                # 파싱 실패시 STX 다음부터 다시 시도
-                self.receive_buffer = self.receive_buffer[1:]
+            # CRC 계산 및 확인
+            packet_data = self.receive_buffer[:expected_total]
+            crc_data = packet_data[:crc_high_pos]  # STX ~ DATA FIELD
+            crc_calculated = self.calculate_crc16(crc_data)
+            
+            crc_high_received = self.receive_buffer[crc_high_pos]
+            crc_low_received = self.receive_buffer[crc_low_pos]
+            crc_received = (crc_high_received << 8) | crc_low_received
+            
+            if crc_received != crc_calculated:
+                packets.append({
+                    'error': 'CRC_MISMATCH',
+                    'detail': f'CRC 불일치: 수신 0x{crc_received:04X}, 계산 0x{crc_calculated:04X}',
+                    'raw_data': ' '.join([f'{b:02X}' for b in packet_data]),
+                    'tx_id': f'0x{tx_id:02X}',
+                    'cmd': f'0x{cmd:02X}',
+                    'data_length': data_length
+                })
+                # 버퍼 초기화
+                self.receive_buffer.clear()
+                break
+            
+            # 정상 패킷 - DATA FIELD 추출
+            data_field = packet_data[4:4+data_length]
+            
+            # 성공 패킷 추가
+            packets.append({
+                'tx_id': tx_id,
+                'cmd': cmd,
+                'data_length': data_length,
+                'data_field': data_field,
+                'crc': crc_received
+            })
+            
+            # 처리한 패킷만큼 버퍼에서 제거
+            self.receive_buffer = self.receive_buffer[expected_total:]
         
         return packets
 
@@ -250,6 +351,7 @@ class SerialCommunication:
         # Heartbeat 설정
         self.heartbeat_interval = 0.1  # 100ms
         self.heartbeat_active = False
+        self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
     
     def get_available_ports(self):
         """사용 가능한 시리얼 포트 목록 반환"""
@@ -263,7 +365,7 @@ class SerialCommunication:
             
             test_connection = serial.Serial(
                 port=port,
-                baudrate=115200,
+                baudrate=9600,
                 timeout=0.1
             )
             test_connection.close()
@@ -362,12 +464,22 @@ class SerialCommunication:
             self.heartbeat_thread.join(timeout=1.0)
         self.status_queue.put(('SYSTEM', "Heartbeat 중지"))
     
+    def pause_heartbeat(self):
+        """Heartbeat 일시 중지 (CMD 0xB3 전송 중 사용)"""
+        self.heartbeat_paused = True
+    
+    def resume_heartbeat(self):
+        """Heartbeat 재개"""
+        self.heartbeat_paused = False
+    
     def _heartbeat_worker(self):
         """Heartbeat 전송 작업자"""
         while self.heartbeat_active and self.is_connected:
             try:
-                packet = self.protocol.create_heartbeat_packet()
-                self.send_queue.put(packet)
+                # Heartbeat가 일시 중지되었으면 대기
+                if not self.heartbeat_paused:
+                    packet = self.protocol.create_heartbeat_packet()
+                    self.send_queue.put(packet)
                 time.sleep(self.heartbeat_interval)
             except Exception as e:
                 if self.heartbeat_active:
@@ -406,6 +518,15 @@ class SerialCommunication:
             try:
                 if self.serial_connection and self.serial_connection.in_waiting > 0:
                     data = self.serial_connection.read(self.serial_connection.in_waiting)
+                    
+                    # RAW 데이터 로깅 (디버그용)
+                    if len(data) > 0:
+                        raw_hex = ' '.join([f'{b:02X}' for b in data])
+                        self.receive_queue.put(('RAW_DATA', {
+                            'data': data.hex().upper(),
+                            'length': len(data),
+                            'bytes': raw_hex
+                        }))
                     
                     # 프로토콜 패킷 파싱
                     packets = self.protocol.process_received_data(data)
@@ -706,6 +827,7 @@ class SerialCommunication:
         # Heartbeat 설정
         self.heartbeat_interval = 0.1  # 100ms
         self.heartbeat_active = False
+        self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
     
     def get_available_ports(self):
         """사용 가능한 시리얼 포트 목록 반환"""
@@ -818,12 +940,22 @@ class SerialCommunication:
             self.heartbeat_thread.join(timeout=1.0)
         self.status_queue.put(('SYSTEM', "Heartbeat 중지"))
     
+    def pause_heartbeat(self):
+        """Heartbeat 일시 중지 (CMD 0xB3 전송 중 사용)"""
+        self.heartbeat_paused = True
+    
+    def resume_heartbeat(self):
+        """Heartbeat 재개"""
+        self.heartbeat_paused = False
+    
     def _heartbeat_worker(self):
         """Heartbeat 전송 작업자"""
         while self.heartbeat_active and self.is_connected:
             try:
-                packet = self.protocol.create_heartbeat_packet()
-                self.send_queue.put(packet)
+                # Heartbeat가 일시 중지되었으면 대기
+                if not self.heartbeat_paused:
+                    packet = self.protocol.create_heartbeat_packet()
+                    self.send_queue.put(packet)
                 time.sleep(self.heartbeat_interval)
             except Exception as e:
                 if self.heartbeat_active:
@@ -862,6 +994,15 @@ class SerialCommunication:
             try:
                 if self.serial_connection and self.serial_connection.in_waiting > 0:
                     data = self.serial_connection.read(self.serial_connection.in_waiting)
+                    
+                    # RAW 데이터 로깅 (디버그용)
+                    if len(data) > 0:
+                        raw_hex = ' '.join([f'{b:02X}' for b in data])
+                        self.receive_queue.put(('RAW_DATA', {
+                            'data': data.hex().upper(),
+                            'length': len(data),
+                            'bytes': raw_hex
+                        }))
                     
                     # 프로토콜 패킷 파싱
                     packets = self.protocol.process_received_data(data)
