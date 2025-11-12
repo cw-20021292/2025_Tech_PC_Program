@@ -53,23 +53,25 @@ class RefrigerationSystem:
         # 보냉 동작 (토글 버튼)
         operation_frame = ttk.Frame(refrigeration_frame)
         operation_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        operation_frame.columnconfigure(0, weight=1)
         ttk.Label(operation_frame, text="보냉 동작:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.labels['operation'] = tk.Label(operation_frame, text="보냉대기", 
                                             fg="white", bg="blue", font=("Arial", 8, "bold"),
                                             width=10, relief="raised", cursor="hand2")
-        self.labels['operation'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['operation'].pack(side=tk.RIGHT)
         self.labels['operation'].bind("<Button-1>", self._toggle_operation)
         
         # 목표 RPS (입력 가능)
         target_rps_frame = ttk.Frame(refrigeration_frame)
         target_rps_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.columnconfigure(0, weight=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         vcmd_rps = (self.root.register(self._validate_rps), '%P')
         self.labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 9), 
                                              width=8, validate='key', validatecommand=vcmd_rps,
                                              state='readonly')
         self.labels['target_rps'].insert(0, "0")
-        self.labels['target_rps'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['target_rps'].pack(side=tk.RIGHT)
         
         # 검증 함수 등록 (온도 필드용)
         vcmd_num = (self.root.register(self._validate_number), '%P')
@@ -77,33 +79,40 @@ class RefrigerationSystem:
         # 목표 온도 (입력 가능)
         target_temp_frame = ttk.Frame(refrigeration_frame)
         target_temp_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(target_temp_frame, text="목표온도:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.labels['target_temp'] = tk.Entry(target_temp_frame, font=("Arial", 9), 
+        temp_unit_frame = ttk.Frame(target_temp_frame)
+        temp_unit_frame.pack(side=tk.RIGHT)
+        self.labels['target_temp'] = tk.Entry(temp_unit_frame, font=("Arial", 9), 
                                               width=8, validate='key', validatecommand=vcmd_num,
                                               state='readonly')
         self.labels['target_temp'].insert(0, "0")
-        self.labels['target_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(target_temp_frame, text="℃", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['target_temp'].pack(side=tk.LEFT)
+        ttk.Label(temp_unit_frame, text="℃", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 첫 온도 (입력 가능)
         first_temp_frame = ttk.Frame(refrigeration_frame)
         first_temp_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        first_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(first_temp_frame, text="첫 온도:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.labels['target_first_temp'] = tk.Entry(first_temp_frame, font=("Arial", 9), 
+        first_temp_unit_frame = ttk.Frame(first_temp_frame)
+        first_temp_unit_frame.pack(side=tk.RIGHT)
+        self.labels['target_first_temp'] = tk.Entry(first_temp_unit_frame, font=("Arial", 9), 
                                                     width=8, validate='key', validatecommand=vcmd_num,
                                                     state='readonly')
         self.labels['target_first_temp'].insert(0, "0")
-        self.labels['target_first_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(first_temp_frame, text="℃", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['target_first_temp'].pack(side=tk.LEFT)
+        ttk.Label(first_temp_unit_frame, text="℃", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 트레이 위치 (입력 모드에서 토글 가능)
         tray_frame = ttk.Frame(refrigeration_frame)
         tray_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        tray_frame.columnconfigure(0, weight=1)
         ttk.Label(tray_frame, text="트레이위치:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.labels['cur_tray_position'] = tk.Label(tray_frame, text="제빙", 
                                                     fg="white", bg="blue", font=("Arial", 8, "bold"),
                                                     width=10, relief="raised", cursor="hand2")
-        self.labels['cur_tray_position'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['cur_tray_position'].pack(side=tk.RIGHT)
         self.labels['cur_tray_position'].bind("<Button-1>", self._toggle_tray_position)
         
         # CMD 전송 버튼

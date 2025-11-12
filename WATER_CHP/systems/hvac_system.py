@@ -22,8 +22,8 @@ class HVACSystem:
         
         # 데이터 저장소
         self.data = {
-            'refrigerant_valve_state': '핫가스',
-            'refrigerant_valve_target': '핫가스',
+            'refrigerant_valve_state_1': '핫가스',
+            'refrigerant_valve_state_2': '핫가스',
             'compressor_state': '미동작',
             'error_code': 0,
             'dc_fan1': 'OFF',
@@ -33,7 +33,8 @@ class HVACSystem:
         # 입력 모드 상태
         self.edit_mode = False
         self.temp_data = {
-            'refrigerant_valve_target': '핫가스',
+            'refrigerant_valve_state_1': '핫가스',
+            'refrigerant_valve_state_2': '핫가스',
             'compressor_state': '미동작',
             'dc_fan1': 'OFF',
             'dc_fan2': 'OFF'
@@ -55,21 +56,20 @@ class HVACSystem:
         # 상태
         state_frame = ttk.Frame(valve_subframe)
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.labels['refrigerant_valve_state'] = tk.Label(state_frame, text="핫가스", 
+        ttk.Label(state_frame, text="1번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['refrigerant_valve_state_1'] = tk.Label(state_frame, text="핫가스", 
                                                           fg="white", bg="red", font=("Arial", 8, "bold"),
                                                           width=8, relief="raised")
-        self.labels['refrigerant_valve_state'].pack(side=tk.RIGHT)
+        self.labels['refrigerant_valve_state_1'].pack(side=tk.RIGHT)
         
         # 목표 (클릭 가능)
         target_frame = ttk.Frame(valve_subframe)
         target_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(target_frame, text="목표:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.labels['refrigerant_valve_target'] = tk.Label(target_frame, text="핫가스", 
+        ttk.Label(target_frame, text="2번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['refrigerant_valve_state_2'] = tk.Label(target_frame, text="핫가스", 
                                                           fg="white", bg="orange", font=("Arial", 8, "bold"),
                                                           width=8, relief="raised", cursor="hand2")
-        self.labels['refrigerant_valve_target'].pack(side=tk.RIGHT)
-        self.labels['refrigerant_valve_target'].bind("<Button-1>", self._toggle_refrigerant_valve_target)
+        self.labels['refrigerant_valve_state_2'].pack(side=tk.RIGHT)
         
         # 압축기 서브프레임
         comp_subframe = ttk.LabelFrame(hvac_frame, text="압축기", padding="3")
@@ -136,40 +136,10 @@ class HVACSystem:
         except ValueError:
             return False
     
-    def _toggle_refrigerant_valve_target(self, event):
-        """냉매전환밸브 목표 토글"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        valve_sequence = ['냉각', '제빙', '핫가스']
-        
-        if self.edit_mode:
-            current_value = self.temp_data['refrigerant_valve_target']
-        else:
-            current_value = self.data['refrigerant_valve_target']
-        
-        try:
-            current_index = valve_sequence.index(current_value)
-            next_index = (current_index + 1) % 3
-            next_value = valve_sequence[next_index]
-        except ValueError:
-            next_value = '냉각'
-        
-        colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
-        self.labels['refrigerant_valve_target'].config(
-            text=next_value, 
-            bg=colors.get(next_value, 'orange')
-        )
-        
-        if self.edit_mode:
-            self.temp_data['refrigerant_valve_target'] = next_value
-            self.log_communication(f"냉매전환밸브 목표 변경: {next_value} (입력 모드)", "purple")
-    
     def _toggle_compressor_state(self, event):
         """압축기 상태 토글"""
         if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
+            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다!")
             return
         
         if self.edit_mode:
@@ -227,16 +197,22 @@ class HVACSystem:
             self.edit_mode = True
             
             # 현재 값을 임시 저장소에 복사
-            self.temp_data['refrigerant_valve_target'] = self.data['refrigerant_valve_target']
+            self.temp_data['refrigerant_valve_state_1'] = self.data['refrigerant_valve_state_1']
+            self.temp_data['refrigerant_valve_state_2'] = self.data['refrigerant_valve_state_2']
             self.temp_data['compressor_state'] = self.data['compressor_state']
             self.temp_data['dc_fan1'] = self.data['dc_fan1']
             self.temp_data['dc_fan2'] = self.data['dc_fan2']
             
             # UI 업데이트
             colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
-            self.labels['refrigerant_valve_target'].config(
-                text=self.temp_data['refrigerant_valve_target'],
-                bg=colors.get(self.temp_data['refrigerant_valve_target'], 'orange')
+            self.labels['refrigerant_valve_state_1'].config(
+                text=self.temp_data['refrigerant_valve_state_1'],
+                bg=colors.get(self.temp_data['refrigerant_valve_state_1'], 'orange')
+            )
+            
+            self.labels['refrigerant_valve_state_2'].config(
+                text=self.temp_data['refrigerant_valve_state_2'],
+                bg=colors.get(self.temp_data['refrigerant_valve_state_2'], 'orange')
             )
             
             if self.temp_data['compressor_state'] == '동작중':
@@ -263,7 +239,8 @@ class HVACSystem:
             # 입력 모드 비활성화 및 데이터 전송
             try:
                 # 임시 저장소의 값을 실제 데이터로 복사
-                self.data['refrigerant_valve_target'] = self.temp_data['refrigerant_valve_target']
+                self.data['refrigerant_valve_state_1'] = self.temp_data['refrigerant_valve_state_1']
+                self.data['refrigerant_valve_state_2'] = self.temp_data['refrigerant_valve_state_2']
                 self.data['compressor_state'] = self.temp_data['compressor_state']
                 self.data['dc_fan1'] = self.temp_data['dc_fan1']
                 self.data['dc_fan2'] = self.temp_data['dc_fan2']
@@ -271,7 +248,8 @@ class HVACSystem:
                 # DATA FIELD 구성 (4바이트) - RPS 제거
                 data_field = bytearray(4)
                 valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2}
-                data_field[0] = valve_map[self.data['refrigerant_valve_target']]
+                data_field[0] = valve_map[self.data['refrigerant_valve_state_1']]
+                data_field[1] = valve_map[self.data['refrigerant_valve_state_2']]
                 data_field[1] = 1 if self.data['compressor_state'] == '동작중' else 0
                 data_field[2] = 1 if self.data['dc_fan1'] == 'ON' else 0
                 data_field[3] = 1 if self.data['dc_fan2'] == 'ON' else 0
@@ -279,7 +257,8 @@ class HVACSystem:
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
                 self.log_communication(f"[공조 제어] CMD 0xB0 전송", "blue")
-                self.log_communication(f"  냉매전환밸브 목표: {self.data['refrigerant_valve_target']} ({data_field[0]})", "gray")
+                self.log_communication(f"  냉매전환밸브 1번 상태: {self.data['refrigerant_valve_state_1']} ({data_field[0]})", "gray")
+                self.log_communication(f"  냉매전환밸브 2번 상태: {self.data['refrigerant_valve_state_2']} ({data_field[1]})", "gray")
                 self.log_communication(f"  압축기 상태: {self.data['compressor_state']} ({data_field[1]})", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
@@ -309,16 +288,15 @@ class HVACSystem:
     def _update_gui(self):
         """GUI 업데이트"""
         # 냉매전환밸브 상태
-        if 'refrigerant_valve_state' in self.labels:
+        if 'refrigerant_valve_state_1' in self.labels:
             colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
-            color = colors.get(self.data['refrigerant_valve_state'], 'gray')
-            self.labels['refrigerant_valve_state'].config(text=self.data['refrigerant_valve_state'], bg=color)
+            color = colors.get(self.data['refrigerant_valve_state_1'], 'gray')
+            self.labels['refrigerant_valve_state_1'].config(text=self.data['refrigerant_valve_state_1'], bg=color)
         
-        # 냉매전환밸브 목표 (입력 모드가 아닐 때만)
-        if 'refrigerant_valve_target' in self.labels and not self.edit_mode:
+        if 'refrigerant_valve_state_2' in self.labels:
             colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
-            color = colors.get(self.data['refrigerant_valve_target'], 'orange')
-            self.labels['refrigerant_valve_target'].config(text=self.data['refrigerant_valve_target'], bg=color)
+            color = colors.get(self.data['refrigerant_valve_state_2'], 'gray')
+            self.labels['refrigerant_valve_state_2'].config(text=self.data['refrigerant_valve_state_2'], bg=color)
         
         # 압축기 상태 (입력 모드가 아닐 때만)
         if 'compressor_state' in self.labels and not self.edit_mode:

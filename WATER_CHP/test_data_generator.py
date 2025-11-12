@@ -21,8 +21,8 @@ class TestDataGenerator:
         
         # 공조시스템 상태
         self.hvac_states = {
-            'refrigerant_valve_state': random.choice(['핫가스', '냉각', '제빙']),
-            'refrigerant_valve_target': random.choice(['핫가스', '냉각', '제빙']),
+            'refrigerant_valve_state_1': random.choice(['핫가스', '냉각', '제빙']),
+            'refrigerant_valve_state_2': random.choice(['핫가스', '냉각', '제빙']),
             'compressor_state': random.choice(['동작중', '미동작']),
             'current_rps': random.randint(0, 100),
             'target_rps': random.randint(0, 100),
@@ -114,7 +114,8 @@ class TestDataGenerator:
             # 공조시스템 상태 변경
             if random.random() < 0.03:  # 3% 확률로 공조시스템 상태 변경
                 component = random.choice(list(self.hvac_states.keys()))
-                if component in ['refrigerant_valve_state', 'refrigerant_valve_target']:
+                if component in ['refrigerant_valve_state_1', 'refrigerant_valve_state_2']:
+                    self.hvac_states[component] = random.choice(['핫가스', '냉각', '제빙'])
                     self.hvac_states[component] = random.choice(['핫가스', '냉각', '제빙'])
                 elif component == 'compressor_state':
                     self.hvac_states[component] = random.choice(['동작중', '미동작'])

@@ -162,9 +162,10 @@ void AT_UART_Tx_Process(void)
     AT_gu8TxData[3] = WORK_CMD_HEARTBEAT_LENGTH;
 
     /* Datafield */
-    AT_gu8TxData[4] = gu8_Amb_Front_Temperature_One_Degree;     // ?쇅湲곗삩?룄
-    AT_gu8TxData[5] = gu8_Room_Temperature_One_Degree;          // ?엯?닔?삩?룄
-    AT_gu8TxData[6] = GetIceStep();                               // ?젣鍮? Step
+    AT_gu8TxData[4] = gu8_Amb_Front_Temperature_One_Degree;     // 외기온도
+    AT_gu8TxData[5] = gu8_Room_Temperature_One_Degree;          // 입수온도
+    AT_gu8TxData[6] = GetIceStep();                             // 제빙단계
+
 
     mu16_cal_crc = Rx_CRC_CCITT(AT_gu8TxData, 7);
     AT_gu8TxData[7] = (U8)HighByte(mu16_cal_crc);

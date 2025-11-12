@@ -49,8 +49,8 @@ class MainGUI:
         
         # 공조시스템
         self.hvac_data = {
-            'refrigerant_valve_state': '핫가스',
-            'refrigerant_valve_target': '핫가스',
+            'refrigerant_valve_state_1': '핫가스',
+            'refrigerant_valve_state_2': '핫가스',
             'compressor_state': '미동작',
             'current_rps': 0,
             'error_code': 0,
@@ -61,7 +61,6 @@ class MainGUI:
         # 공조시스템 입력 모드 상태
         self.hvac_edit_mode = False  # 입력 모드 활성화 여부
         self.hvac_temp_data = {
-            'refrigerant_valve_target': '핫가스',  # 냉각/제빙/핫가스
             'compressor_state': '미동작',  # 동작/미동작
             'dc_fan1': 'OFF',  # ON/OFF
             'dc_fan2': 'OFF'   # ON/OFF
@@ -227,50 +226,53 @@ class MainGUI:
         main_frame = ttk.Frame(freezing_frame, padding="2")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 상단 영역
+        # 상단 영역 (그래프)
         top_frame = ttk.Frame(main_frame)
         top_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 2))
         
-        # 중단 영역
+        # 중단 영역 (시스템 제어)
         middle_frame = ttk.Frame(main_frame)
         middle_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 2))
         
-        # 하단 영역
+        # 하단 영역 (밸브/센서)
         bottom_frame = ttk.Frame(main_frame)
         bottom_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # 상단 영역 레이아웃
-        self.create_cooling_area(top_frame)
-        self.create_hvac_area(top_frame)
-        self.create_icemaking_area(top_frame)
-        self.refrigeration_system.create_widgets(top_frame)  # 보냉시스템 추가
+        # 상단 영역 레이아웃 (그래프 2개 가로 배치)
         self.create_graph_areas(top_frame)
         
-        # 중단 영역 레이아웃
-        self.create_valve_area(middle_frame)
-        self.create_sensor_area(middle_frame)
+        # 중단 영역 레이아웃 (시스템 제어)
+        self.create_cooling_area(middle_frame)
+        self.create_hvac_area(middle_frame)
+        self.create_icemaking_area(middle_frame)
+        self.refrigeration_system.create_widgets(middle_frame)  # 보냉시스템 추가
         
-        # 하단 영역 레이아웃
+        # 하단 영역 레이아웃 (밸브/센서)
+        self.create_valve_area(bottom_frame)
         self.create_drain_tank_area(bottom_frame)
-        self.create_drain_pump_area(bottom_frame)
+        self.create_sensor_area(bottom_frame)
         
-        # 프레임 확장 설정 (보냉시스템 추가로 5개로 변경)
-        for i in range(5):
-            top_frame.columnconfigure(i, weight=1)
+        # 프레임 확장 설정
+        # 상단 프레임 (그래프 2개 가로 배치)
+        top_frame.columnconfigure(0, weight=1)
+        top_frame.columnconfigure(1, weight=1)
         top_frame.rowconfigure(0, weight=1)
         
-        middle_frame.columnconfigure(0, weight=1)
-        middle_frame.columnconfigure(1, weight=1)
+        # 중단 프레임 (시스템 제어 4개)
+        for i in range(4):
+            middle_frame.columnconfigure(i, weight=1)
         middle_frame.rowconfigure(0, weight=1)
         
+        # 하단 프레임 (밸브/센서 3개)
         bottom_frame.columnconfigure(0, weight=1)
         bottom_frame.columnconfigure(1, weight=1)
+        bottom_frame.columnconfigure(2, weight=1)
         bottom_frame.rowconfigure(0, weight=1)
         
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(0, weight=3)
-        main_frame.rowconfigure(1, weight=4)
-        main_frame.rowconfigure(2, weight=1)
+        main_frame.rowconfigure(0, weight=2)  # 그래프 영역
+        main_frame.rowconfigure(1, weight=3)  # 시스템 제어 영역
+        main_frame.rowconfigure(2, weight=4)  # 밸브/센서 영역
     
     def create_control_tab(self):
         """제어검토용 탭 생성"""
@@ -292,7 +294,7 @@ class MainGUI:
         bottom_frame = ttk.Frame(main_frame)
         bottom_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # 상단 영역 레이아웃
+        # 상단 영역 레이아웃 (그래프 2개 가로 배치)
         self.create_graph_areas(top_frame)
         
         # 중단 영역 레이아웃
@@ -302,6 +304,11 @@ class MainGUI:
         self.create_control_sections(bottom_frame)
         
         # 프레임 확장 설정
+        # 상단 프레임 (그래프 2개 가로 배치)
+        top_frame.columnconfigure(0, weight=1)
+        top_frame.columnconfigure(1, weight=1)
+        top_frame.rowconfigure(0, weight=1)
+        
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=2)
         main_frame.rowconfigure(1, weight=4)
@@ -315,57 +322,68 @@ class MainGUI:
         # 운전 상태
         state_frame = ttk.Frame(cooling_frame)
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        state_frame.columnconfigure(0, weight=1)
         ttk.Label(state_frame, text="운전 상태:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         self.cooling_labels['operation_state'] = tk.Label(state_frame, text="STOP", 
                                                         fg="white", bg="red", font=("Arial", 7, "bold"),
                                                         width=8, relief="raised")
-        self.cooling_labels['operation_state'].pack(side=tk.LEFT, padx=(2, 0))
+        self.cooling_labels['operation_state'].pack(side=tk.RIGHT)
         
         # 목표 RPS (입력 가능)
         target_rps_frame = ttk.Frame(cooling_frame)
         target_rps_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.columnconfigure(0, weight=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         vcmd_rps = (self.root.register(self.validate_rps), '%P')
         self.cooling_labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 8), 
                                              width=6, validate='key', validatecommand=vcmd_rps,
                                              state='readonly')
         self.cooling_labels['target_rps'].insert(0, "0")
-        self.cooling_labels['target_rps'].pack(side=tk.LEFT, padx=(2, 0))
+        self.cooling_labels['target_rps'].pack(side=tk.RIGHT)
         
         # ON 온도 (입력 가능)
         on_temp_frame = ttk.Frame(cooling_frame)
         on_temp_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        on_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(on_temp_frame, text="ON 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         
         vcmd_temp = (self.root.register(self.validate_number), '%P')
-        self.cooling_labels['on_temp'] = tk.Entry(on_temp_frame, font=("Arial", 8), 
+        temp_unit_frame = ttk.Frame(on_temp_frame)
+        temp_unit_frame.pack(side=tk.RIGHT)
+        self.cooling_labels['on_temp'] = tk.Entry(temp_unit_frame, font=("Arial", 8), 
                                                 width=6, validate='key', validatecommand=vcmd_temp,
                                                 state='readonly')  # 기본 읽기 전용
         self.cooling_labels['on_temp'].insert(0, "0")
-        self.cooling_labels['on_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(on_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.cooling_labels['on_temp'].pack(side=tk.LEFT)
+        ttk.Label(temp_unit_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # OFF 온도 (입력 가능)
         off_temp_frame = ttk.Frame(cooling_frame)
         off_temp_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        off_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(off_temp_frame, text="OFF 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.cooling_labels['off_temp'] = tk.Entry(off_temp_frame, font=("Arial", 8), 
+        temp_unit_frame2 = ttk.Frame(off_temp_frame)
+        temp_unit_frame2.pack(side=tk.RIGHT)
+        self.cooling_labels['off_temp'] = tk.Entry(temp_unit_frame2, font=("Arial", 8), 
                                                 width=6, validate='key', validatecommand=vcmd_temp,
                                                 state='readonly')  # 기본 읽기 전용
         self.cooling_labels['off_temp'].insert(0, "0")
-        self.cooling_labels['off_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(off_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.cooling_labels['off_temp'].pack(side=tk.LEFT)
+        ttk.Label(temp_unit_frame2, text="℃", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 냉각 추가시간 (입력 가능)
         add_time_frame = ttk.Frame(cooling_frame)
         add_time_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
+        add_time_frame.columnconfigure(0, weight=1)
         ttk.Label(add_time_frame, text="추가시간:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.cooling_labels['cooling_additional_time'] = tk.Entry(add_time_frame, font=("Arial", 8), 
+        time_unit_frame = ttk.Frame(add_time_frame)
+        time_unit_frame.pack(side=tk.RIGHT)
+        self.cooling_labels['cooling_additional_time'] = tk.Entry(time_unit_frame, font=("Arial", 8), 
                                                                 width=6, validate='key', validatecommand=vcmd_temp,
                                                                 state='readonly')  # 기본 읽기 전용
         self.cooling_labels['cooling_additional_time'].insert(0, "0")
-        self.cooling_labels['cooling_additional_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(add_time_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.cooling_labels['cooling_additional_time'].pack(side=tk.LEFT)
+        ttk.Label(time_unit_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # CMD 0xB1 전송 버튼
         send_btn_frame = ttk.Frame(cooling_frame)
@@ -986,43 +1004,6 @@ class MainGUI:
         except Exception as e:
             self.log_communication(f"제빙테이블 전송 오류: {str(e)}", "red")
             return False
-    
-    def toggle_refrigerant_valve_target(self, event):
-        """냉매전환밸브 목표 토글 (냉각->제빙->핫가스->냉각)"""
-
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        valve_sequence = ['냉각', '제빙', '핫가스']
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['refrigerant_valve_target']
-        else:
-            current_value = self.hvac_data['refrigerant_valve_target']
-        
-        try:
-            current_index = valve_sequence.index(current_value)
-            next_index = (current_index + 1) % 3
-            next_value = valve_sequence[next_index]
-        except ValueError:
-            next_value = '냉각'
-        
-        # UI 업데이트
-        colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
-        self.hvac_labels['refrigerant_valve_target'].config(
-            text=next_value, 
-            bg=colors.get(next_value, 'orange')
-        )
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['refrigerant_valve_target'] = next_value
-            self.log_communication(f"냉매전환밸브 목표 변경: {next_value} (입력 모드)", "purple")
-            print(f"DEBUG: 임시 저장소에 저장됨")  # 디버그
-        else:
-            pass
 
     def toggle_compressor_state(self, event):
         """압축기 상태 토글 (동작중<->미동작)"""
@@ -1281,16 +1262,22 @@ class MainGUI:
             self.hvac_edit_mode = True
             
             # 현재 값을 임시 저장소에 복사
-            self.hvac_temp_data['refrigerant_valve_target'] = self.hvac_data['refrigerant_valve_target']
+            self.hvac_temp_data['refrigerant_valve_state_1'] = self.hvac_data['refrigerant_valve_state_1']
+            self.hvac_temp_data['refrigerant_valve_state_2'] = self.hvac_data['refrigerant_valve_state_2']
             self.hvac_temp_data['compressor_state'] = self.hvac_data['compressor_state']
             self.hvac_temp_data['dc_fan1'] = self.hvac_data['dc_fan1']
             self.hvac_temp_data['dc_fan2'] = self.hvac_data['dc_fan2']
             
             # UI를 임시 저장소 값으로 초기화
             colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red'}
-            self.hvac_labels['refrigerant_valve_target'].config(
-                text=self.hvac_temp_data['refrigerant_valve_target'],
-                bg=colors.get(self.hvac_temp_data['refrigerant_valve_target'], 'orange')
+            self.hvac_labels['refrigerant_valve_state_1'].config(
+                text=self.hvac_temp_data['refrigerant_valve_state_1'],
+                bg=colors.get(self.hvac_temp_data['refrigerant_valve_state_1'], 'orange')
+            )
+            
+            self.hvac_labels['refrigerant_valve_state_2'].config(
+                text=self.hvac_temp_data['refrigerant_valve_state_2'],
+                bg=colors.get(self.hvac_temp_data['refrigerant_valve_state_2'], 'orange')
             )
             
             if self.hvac_temp_data['compressor_state'] == '동작중':
@@ -1317,7 +1304,8 @@ class MainGUI:
             # ========== 입력 모드 비활성화 및 데이터 전송 ==========
             try:
                 # 임시 저장소의 모든 값을 실제 데이터로 복사
-                self.hvac_data['refrigerant_valve_target'] = self.hvac_temp_data['refrigerant_valve_target']
+                self.hvac_data['refrigerant_valve_state_1'] = self.hvac_temp_data['refrigerant_valve_state_1']
+                self.hvac_data['refrigerant_valve_state_2'] = self.hvac_temp_data['refrigerant_valve_state_2']
                 self.hvac_data['compressor_state'] = self.hvac_temp_data['compressor_state']
                 self.hvac_data['dc_fan1'] = self.hvac_temp_data['dc_fan1']
                 self.hvac_data['dc_fan2'] = self.hvac_temp_data['dc_fan2']
@@ -1327,7 +1315,8 @@ class MainGUI:
                 
                 # DATA 1: 냉매전환밸브 목표 (냉각=0, 제빙=1, 핫가스=2)
                 valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2}
-                data_field[0] = valve_map[self.hvac_data['refrigerant_valve_target']]
+                data_field[0] = valve_map[self.hvac_data['refrigerant_valve_state_1']]
+                data_field[1] = valve_map[self.hvac_data['refrigerant_valve_state_2']]
                 
                 # DATA 2: 압축기 상태 (동작=1, 미동작=0)
                 data_field[1] = 1 if self.hvac_data['compressor_state'] == '동작중' else 0
@@ -1341,8 +1330,9 @@ class MainGUI:
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
                 self.log_communication(f"[공조 제어] CMD 0xB0 전송 (입력 모드 최종 설정)", "blue")
-                self.log_communication(f"  냉매전환밸브 목표: {self.hvac_data['refrigerant_valve_target']} ({data_field[0]})", "gray")
-                self.log_communication(f"  압축기 상태: {self.hvac_data['compressor_state']} ({data_field[1]})", "gray")
+                self.log_communication(f"  냉매전환밸브 1번 상태: {self.hvac_data['refrigerant_valve_state_1']} ({data_field[0]})", "gray")
+                self.log_communication(f"  냉매전환밸브 2번 상태: {self.hvac_data['refrigerant_valve_state_2']} ({data_field[1]})", "gray")
+                self.log_communication(f"  압축기 상태: {self.hvac_data['compressor_state']} ({data_field[2]})", "gray")
                 self.log_communication(f"  압축기 팬: {self.hvac_data['dc_fan1']} ({data_field[2]})", "gray")
                 self.log_communication(f"  얼음탱크 팬: {self.hvac_data['dc_fan2']} ({data_field[3]})", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
@@ -1379,7 +1369,7 @@ class MainGUI:
         # 상태
         state_frame = ttk.Frame(valve_subframe)
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Label(state_frame, text="1번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['refrigerant_valve_state'] = tk.Label(state_frame, text="핫가스", 
                                                             fg="white", bg="red", font=("Arial", 8, "bold"),
                                                             width=8, relief="raised")
@@ -1388,13 +1378,11 @@ class MainGUI:
         # 목표 (버튼으로 변경 - 클릭 가능하게 설정)
         target_frame = ttk.Frame(valve_subframe)
         target_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(target_frame, text="목표:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['refrigerant_valve_target'] = tk.Label(target_frame, text="핫가스", 
+        ttk.Label(target_frame, text="2번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.hvac_labels['refrigerant_valve_state_2'] = tk.Label(target_frame, text="핫가스", 
                                                             fg="white", bg="orange", font=("Arial", 8, "bold"),
                                                             width=8, relief="raised", cursor="hand2")
-        self.hvac_labels['refrigerant_valve_target'].pack(side=tk.RIGHT)
-        # 클릭 이벤트 바인딩 확인
-        self.hvac_labels['refrigerant_valve_target'].bind("<Button-1>", self.toggle_refrigerant_valve_target)
+        self.hvac_labels['refrigerant_valve_state_2'].pack(side=tk.RIGHT)
         
         # 압축기 서브프레임
         comp_subframe = ttk.LabelFrame(hvac_frame, text="압축기", padding="3")
@@ -1403,7 +1391,7 @@ class MainGUI:
         # 상태 (버튼으로 변경 - 클릭 가능하게 설정)
         comp_state_frame = ttk.Frame(comp_subframe)
         comp_state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(comp_state_frame, text="상태:", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Label(comp_state_frame, text="가동 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.hvac_labels['compressor_state'] = tk.Label(comp_state_frame, text="미동작", 
                                                     fg="white", bg="gray", font=("Arial", 8, "bold"),
                                                     width=8, relief="raised", cursor="hand2")
@@ -1471,69 +1459,83 @@ class MainGUI:
         # 제빙 동작 (토글 버튼으로 변경)
         operation_frame = ttk.Frame(icemaking_frame)
         operation_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        operation_frame.columnconfigure(0, weight=1)
         ttk.Label(operation_frame, text="제빙 동작:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.icemaking_labels['operation'] = tk.Label(operation_frame, text="대기", 
                                                     fg="white", bg="blue", font=("Arial", 8, "bold"),
                                                     width=10, relief="raised", cursor="hand2")
-        self.icemaking_labels['operation'].pack(side=tk.LEFT, padx=(2, 0))
+        self.icemaking_labels['operation'].pack(side=tk.RIGHT)
         self.icemaking_labels['operation'].bind("<Button-1>", self.toggle_icemaking_operation)
         
         # 목표 RPS (입력 가능)
         target_rps_frame = ttk.Frame(icemaking_frame)
         target_rps_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.columnconfigure(0, weight=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         vcmd_rps = (self.root.register(self.validate_rps), '%P')
         self.icemaking_labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 9), 
                                              width=8, validate='key', validatecommand=vcmd_rps,
                                              state='readonly')
         self.icemaking_labels['target_rps'].insert(0, "0")
-        self.icemaking_labels['target_rps'].pack(side=tk.LEFT, padx=(2, 0))
+        self.icemaking_labels['target_rps'].pack(side=tk.RIGHT)
         
         # 제빙시간 (ms 단위, 입력 가능)
         time_frame = ttk.Frame(icemaking_frame)
         time_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        time_frame.columnconfigure(0, weight=1)
         ttk.Label(time_frame, text="제빙시간:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         
         vcmd_num = (self.root.register(self.validate_number), '%P')
-        self.icemaking_labels['icemaking_time'] = tk.Entry(time_frame, font=("Arial", 9), 
+        time_unit_frame = ttk.Frame(time_frame)
+        time_unit_frame.pack(side=tk.RIGHT)
+        self.icemaking_labels['icemaking_time'] = tk.Entry(time_unit_frame, font=("Arial", 9), 
                                                 width=8, validate='key', validatecommand=vcmd_num,
                                                 state='readonly')
         self.icemaking_labels['icemaking_time'].insert(0, "0")
-        self.icemaking_labels['icemaking_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(time_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.icemaking_labels['icemaking_time'].pack(side=tk.LEFT)
+        ttk.Label(time_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 입수 용량 (Hz 단위, 입력 가능)
         capacity_frame = ttk.Frame(icemaking_frame)
         capacity_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        capacity_frame.columnconfigure(0, weight=1)
         ttk.Label(capacity_frame, text="입수 용량:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['water_capacity'] = tk.Entry(capacity_frame, font=("Arial", 9), 
+        capacity_unit_frame = ttk.Frame(capacity_frame)
+        capacity_unit_frame.pack(side=tk.RIGHT)
+        self.icemaking_labels['water_capacity'] = tk.Entry(capacity_unit_frame, font=("Arial", 9), 
                                                     width=8, validate='key', validatecommand=vcmd_num,
                                                     state='readonly')
         self.icemaking_labels['water_capacity'].insert(0, "0")
-        self.icemaking_labels['water_capacity'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(capacity_frame, text="Hz", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.icemaking_labels['water_capacity'].pack(side=tk.LEFT)
+        ttk.Label(capacity_unit_frame, text="Hz", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 스윙바 ON 시간 (ms 단위, 입력 가능)
         swing_on_frame = ttk.Frame(icemaking_frame)
         swing_on_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        swing_on_frame.columnconfigure(0, weight=1)
         ttk.Label(swing_on_frame, text="스윙바 ON:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['swing_on_time'] = tk.Entry(swing_on_frame, font=("Arial", 9), 
+        swing_on_unit_frame = ttk.Frame(swing_on_frame)
+        swing_on_unit_frame.pack(side=tk.RIGHT)
+        self.icemaking_labels['swing_on_time'] = tk.Entry(swing_on_unit_frame, font=("Arial", 9), 
                                                     width=8, validate='key', validatecommand=vcmd_num,
                                                     state='readonly')
         self.icemaking_labels['swing_on_time'].insert(0, "0")
-        self.icemaking_labels['swing_on_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(swing_on_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.icemaking_labels['swing_on_time'].pack(side=tk.LEFT)
+        ttk.Label(swing_on_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 스윙바 OFF 시간 (ms 단위, 입력 가능)
         swing_off_frame = ttk.Frame(icemaking_frame)
         swing_off_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
+        swing_off_frame.columnconfigure(0, weight=1)
         ttk.Label(swing_off_frame, text="스윙바 OFF:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.icemaking_labels['swing_off_time'] = tk.Entry(swing_off_frame, font=("Arial", 9), 
+        swing_off_unit_frame = ttk.Frame(swing_off_frame)
+        swing_off_unit_frame.pack(side=tk.RIGHT)
+        self.icemaking_labels['swing_off_time'] = tk.Entry(swing_off_unit_frame, font=("Arial", 9), 
                                                     width=8, validate='key', validatecommand=vcmd_num,
                                                     state='readonly')
         self.icemaking_labels['swing_off_time'].insert(0, "0")
-        self.icemaking_labels['swing_off_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(swing_off_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.icemaking_labels['swing_off_time'].pack(side=tk.LEFT)
+        ttk.Label(swing_off_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # CMD 0xB2 전송 버튼
         send_btn_frame = ttk.Frame(icemaking_frame)
@@ -1553,16 +1555,13 @@ class MainGUI:
     
     def create_graph_areas(self, parent):
         """그래프 영역 생성"""
-        graph_container = ttk.Frame(parent)
-        graph_container.grid(row=0, column=4, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(2, 0))
-        
         # 그래프 1
-        graph1_frame = ttk.LabelFrame(graph_container, text="그래프 1", padding="3")
-        graph1_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 2))
+        graph1_frame = ttk.LabelFrame(parent, text="그래프 1", padding="3")
+        graph1_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
         
         # 그래프 2
-        graph2_frame = ttk.LabelFrame(graph_container, text="그래프 2", padding="3")
-        graph2_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(2, 0))
+        graph2_frame = ttk.LabelFrame(parent, text="그래프 2", padding="3")
+        graph2_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # 그래프 생성 카운트
         if not hasattr(self, '_graph_creation_count'):
@@ -1638,9 +1637,6 @@ class MainGUI:
         graph1_frame.rowconfigure(0, weight=1)
         graph2_frame.columnconfigure(0, weight=1)
         graph2_frame.rowconfigure(0, weight=1)
-        graph_container.columnconfigure(0, weight=1)
-        graph_container.rowconfigure(0, weight=1)
-        graph_container.rowconfigure(1, weight=1)
     
     def create_valve_area(self, parent):
         """밸브류 섹션 생성"""
@@ -1715,7 +1711,7 @@ class MainGUI:
     def create_sensor_area(self, parent):
         """센서류 섹션 생성"""
         sensor_frame = ttk.LabelFrame(parent, text="센서류", padding="2")
-        sensor_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=2)
+        sensor_frame.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(2, 0))
         
         sensors = [
             ('outdoor_temp1', '외기온도 1'),
@@ -1753,7 +1749,7 @@ class MainGUI:
     def create_drain_tank_area(self, parent):
         """드레인 탱크 섹션 생성"""
         drain_tank_frame = ttk.LabelFrame(parent, text="드레인 탱크", padding="2")
-        drain_tank_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
+        drain_tank_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=2)
         
         low_level_frame = ttk.Frame(drain_tank_frame)
         low_level_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
@@ -1779,22 +1775,16 @@ class MainGUI:
                                                               width=8, relief="raised")
         self.drain_tank_labels['water_level_state'].pack(side=tk.LEFT, padx=(2, 0))
         
-        drain_tank_frame.columnconfigure(0, weight=1)
-    
-    def create_drain_pump_area(self, parent):
-        """드레인 펌프 섹션 생성"""
-        drain_pump_frame = ttk.LabelFrame(parent, text="드레인 펌프", padding="2")
-        drain_pump_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(1, 0))
-        
-        state_frame = ttk.Frame(drain_pump_frame)
-        state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(state_frame, text="운전 상태:", font=("Arial", 7), width=8).pack(side=tk.LEFT)
-        self.drain_pump_labels['operation_state'] = tk.Label(state_frame, text="OFF", 
-                                                           fg="white", bg="red", font=("Arial", 7, "bold"),
-                                                           width=6, relief="raised")
+        # 드레인펌프 운전 상태 추가
+        pump_state_frame = ttk.Frame(drain_tank_frame)
+        pump_state_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        ttk.Label(pump_state_frame, text="펌프 상태:", font=("Arial", 9), width=8).pack(side=tk.LEFT)
+        self.drain_pump_labels['operation_state'] = tk.Label(pump_state_frame, text="OFF", 
+                                                           fg="white", bg="red", font=("Arial", 8, "bold"),
+                                                           width=8, relief="raised")
         self.drain_pump_labels['operation_state'].pack(side=tk.LEFT, padx=(2, 0))
         
-        drain_pump_frame.columnconfigure(0, weight=1)
+        drain_tank_frame.columnconfigure(0, weight=1)
     
     def create_control_sections(self, parent):
         """제어검토용 탭의 제어 관련 섹션들 생성"""
@@ -2864,27 +2854,6 @@ class MainGUI:
                 except (ValueError, TypeError):
                     label.config(text="0.0")
         
-        # # 공조시스템 상태 업데이트
-        # for hvac_key, value in self.hvac_data.items():
-        #     if hvac_key in self.hvac_labels:
-        #         label = self.hvac_labels[hvac_key]
-        #         if hvac_key in ['refrigerant_valve_state', 'refrigerant_valve_target']:
-        #             colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
-        #             color = colors.get(value, 'gray')
-        #             label.config(text=value, bg=color)
-        #         elif hvac_key == 'compressor_state':
-        #             if value == '동작중':
-        #                 label.config(text="동작중", bg="green")
-        #             else:
-        #                 label.config(text="미동작", bg="gray")
-        #         elif hvac_key in ['dc_fan1', 'dc_fan2']:
-        #             if value == 'ON':
-        #                 label.config(text="ON", bg="green")
-        #             else:
-        #                 label.config(text="OFF", bg="gray")
-        #         else:
-        #             label.config(text=str(value))
-        
         # 냉각 시스템 상태 업데이트
         for cooling_key, value in self.cooling_data.items():
             if cooling_key in self.cooling_labels:
@@ -2925,12 +2894,6 @@ class MainGUI:
                     colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
                     color = colors.get(value, 'gray')
                     label.config(text=value, bg=color)
-                elif hvac_key == 'refrigerant_valve_target':
-                    # 입력 모드가 아닐 때만 업데이트
-                    if not self.hvac_edit_mode:
-                        colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green'}
-                        color = colors.get(value, 'orange')
-                        label.config(text=value, bg=color)
                 elif hvac_key == 'compressor_state':
                     # 상태는 항상 업데이트 (하지만 입력 모드에서는 제어용 라벨 표시)
                     if not self.hvac_edit_mode:
