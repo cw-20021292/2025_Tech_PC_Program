@@ -26,6 +26,7 @@ class HVACSystem:
             'refrigerant_valve_state_2': '핫가스',
             'compressor_state': '미동작',
             'error_code': 0,
+            'stabilization_time': 0,  # 안정화 시간
             'dc_fan1': 'OFF',
             'dc_fan2': 'OFF'
         }
@@ -85,9 +86,17 @@ class HVACSystem:
         self.labels['compressor_state'].pack(side=tk.RIGHT)
         self.labels['compressor_state'].bind("<Button-1>", self._toggle_compressor_state)
         
+        # 안정화 시간
+        stabilization_frame = ttk.Frame(comp_subframe)
+        stabilization_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        ttk.Label(stabilization_frame, text="안정화 시간:", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['stabilization_time'] = tk.Label(stabilization_frame, text="0", 
+                                                    font=("Arial", 8), bg="white", relief="sunken")
+        self.labels['stabilization_time'].pack(side=tk.RIGHT)
+        
         # 에러코드
         error_frame = ttk.Frame(comp_subframe)
-        error_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        error_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(error_frame, text="에러코드:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.labels['error_code'] = tk.Label(error_frame, text="0", 
                                             font=("Arial", 8), bg="white", relief="sunken")
@@ -95,7 +104,7 @@ class HVACSystem:
         
         # DC FAN 1 (클릭 가능)
         fan1_frame = ttk.Frame(comp_subframe)
-        fan1_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        fan1_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(fan1_frame, text="압축기 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.labels['dc_fan1'] = tk.Label(fan1_frame, text="OFF", 
                                          fg="white", bg="gray", font=("Arial", 8, "bold"),
@@ -105,7 +114,7 @@ class HVACSystem:
         
         # DC FAN 2 (클릭 가능)
         fan2_frame = ttk.Frame(comp_subframe)
-        fan2_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        fan2_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
         ttk.Label(fan2_frame, text="얼음탱크 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
         self.labels['dc_fan2'] = tk.Label(fan2_frame, text="OFF", 
                                          fg="white", bg="gray", font=("Arial", 8, "bold"),
@@ -247,19 +256,19 @@ class HVACSystem:
                 
                 # DATA FIELD 구성 (4바이트) - RPS 제거
                 data_field = bytearray(4)
-                valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2}
-                data_field[0] = valve_map[self.data['refrigerant_valve_state_1']]
-                data_field[1] = valve_map[self.data['refrigerant_valve_state_2']]
-                data_field[1] = 1 if self.data['compressor_state'] == '동작중' else 0
-                data_field[2] = 1 if self.data['dc_fan1'] == 'ON' else 0
-                data_field[3] = 1 if self.data['dc_fan2'] == 'ON' else 0
+                # 냉매전환밸브 매핑 (0: 냉각, 1: 제빙, 2: 핫가스, 3: 보냉)
+                valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2, '보냉': 3}
+                data_field[0] = valve_map.get(self.data['refrigerant_valve_state_1'], 2)  # 기본값: 핫가스(2)
+                data_field[1] = valve_map.get(self.data['refrigerant_valve_state_2'], 2)  # 기본값: 핫가스(2)
+                data_field[2] = 1 if self.data['compressor_state'] == '동작중' else 0
+                data_field[3] = 1 if self.data['dc_fan1'] == 'ON' else 0
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
                 self.log_communication(f"[공조 제어] CMD 0xB0 전송", "blue")
                 self.log_communication(f"  냉매전환밸브 1번 상태: {self.data['refrigerant_valve_state_1']} ({data_field[0]})", "gray")
                 self.log_communication(f"  냉매전환밸브 2번 상태: {self.data['refrigerant_valve_state_2']} ({data_field[1]})", "gray")
-                self.log_communication(f"  압축기 상태: {self.data['compressor_state']} ({data_field[1]})", "gray")
+                self.log_communication(f"  압축기 상태: {self.data['compressor_state']} ({data_field[2]})", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
                 # CMD 0xB0 패킷 전송
@@ -314,9 +323,12 @@ class HVACSystem:
                     else:
                         self.labels[fan_key].config(text="OFF", bg="gray")
         
-        # 현재 RPS, 에러코드 (항상 업데이트)
+        # 에러코드, 안정화 시간 (항상 업데이트)
         if 'error_code' in self.labels:
             self.labels['error_code'].config(text=str(self.data.get('error_code', 0)))
+        
+        if 'stabilization_time' in self.labels:
+            self.labels['stabilization_time'].config(text=str(self.data.get('stabilization_time', 0)))
     
     def set_connection_state(self, connected):
         """연결 상태에 따라 버튼 활성화/비활성화"""

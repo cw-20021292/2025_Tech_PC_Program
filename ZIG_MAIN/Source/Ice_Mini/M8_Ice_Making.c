@@ -205,9 +205,9 @@ void SetUsedFreezingTable(U8 Used)
 * Output       : Á¦ºù ½Ã°£
 * Return       : Á¦ºù ½Ã°£
 ******************************************************************************/
-U16 GetFreezingTime(U8 RoomInTemp)
+U16 GetFreezingTime(U8 AmbTemp)
 {
-    return FreezingTable.MakeTime[RoomInTemp];
+    return FreezingTable.MakeTime[AmbTemp];
 }
 
 /***********************************************************************************************************************
@@ -526,7 +526,7 @@ void ice_make_operation(void)
                 {
                     if(GetUsedFreezingTable() == SET)
                     {
-                        gu16IceMakeTime = GetFreezingTime(gu8_Room_Temperature_One_Degree);
+                        gu16IceMakeTime = GetFreezingTime(gu8_Amb_Front_Temperature_One_Degree);
 
                         IceTableDebug.amb_temp = gu8_Amb_Front_Temperature_One_Degree;
                         IceTableDebug.room_temp = gu8_Room_Temperature_One_Degree;

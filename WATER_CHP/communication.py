@@ -151,7 +151,7 @@ class ProtocolHandler:
             cmd = packet_data[2]
             data_length = packet_data[3]
             
-            expected_total = 6 + data_length  # STX + TX_ID + CMD + LEN + DATA + CRC16 + ETX
+            expected_total = 7 + data_length  # STX(1) + TX_ID(1) + CMD(1) + LEN(1) + DATA(N) + CRC16(2) + ETX(1)
             
             if len(packet_data) != expected_total:
                 return {
@@ -186,8 +186,8 @@ class ProtocolHandler:
                     'raw_data': ' '.join([f'{b:02X}' for b in packet_data])
                 }
             
-            # CRC 검증
-            crc_data = packet_data[:-3]  # STX ~ DATA FIELD
+            # CRC 검증 (STX ~ DATA FIELD까지 계산)
+            crc_data = packet_data[:4+data_length]  # STX(1) + TX_ID(1) + CMD(1) + LEN(1) + DATA(N)
             crc_calculated = self.calculate_crc16(crc_data)
             
             if crc_received != crc_calculated:
@@ -349,7 +349,7 @@ class SerialCommunication:
         self.protocol = ProtocolHandler()
         
         # Heartbeat 설정
-        self.heartbeat_interval = 0.1  # 100ms
+        self.heartbeat_interval = 0.2  # 200ms
         self.heartbeat_active = False
         self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
     
@@ -455,7 +455,7 @@ class SerialCommunication:
         self.heartbeat_active = True
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
         self.heartbeat_thread.start()
-        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 100ms 간격)"))
+        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 200ms 간격)"))
     
     def stop_heartbeat(self):
         """Heartbeat 전송 중지"""
@@ -825,7 +825,7 @@ class SerialCommunication:
         self.protocol = ProtocolHandler()
         
         # Heartbeat 설정
-        self.heartbeat_interval = 0.1  # 100ms
+        self.heartbeat_interval = 0.2  # 200ms
         self.heartbeat_active = False
         self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
     
@@ -931,7 +931,7 @@ class SerialCommunication:
         self.heartbeat_active = True
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
         self.heartbeat_thread.start()
-        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 100ms 간격)"))
+        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 200ms 간격)"))
     
     def stop_heartbeat(self):
         """Heartbeat 전송 중지"""
