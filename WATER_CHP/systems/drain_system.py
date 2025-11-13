@@ -30,10 +30,10 @@ class DrainTankSystem:
         # GUI 위젯 참조
         self.labels = {}
     
-    def create_widgets(self, parent):
+    def create_widgets(self, parent, row=0, column=0):
         """드레인탱크 섹션 GUI 위젯 생성"""
         drain_tank_frame = ttk.LabelFrame(parent, text="드레인탱크", padding="2")
-        drain_tank_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
+        drain_tank_frame.grid(row=row, column=column, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
         
         # 저수위
         low_level_frame = ttk.Frame(drain_tank_frame)

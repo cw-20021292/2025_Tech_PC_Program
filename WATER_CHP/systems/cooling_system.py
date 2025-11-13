@@ -24,6 +24,7 @@ class CoolingSystem:
         # 데이터 저장소
         self.data = {
             'operation_state': 'STOP',
+            'initial_startup': False,      # 초기기동 여부 (1:초기기동, 0:일반기동)
             'target_rps': 0,               # 목표 RPS
             'on_temp': 0,
             'off_temp': 0,
@@ -45,61 +46,82 @@ class CoolingSystem:
         # 운전 상태
         state_frame = ttk.Frame(cooling_frame)
         state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        state_frame.columnconfigure(0, weight=1)
         ttk.Label(state_frame, text="운전 상태:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.labels['operation_state'] = tk.Label(state_frame, text="STOP", 
-                                                    fg="white", bg="red", font=("Arial", 7, "bold"),
+        self.labels['operation_state'] = tk.Label(state_frame, text="대기", 
+                                                    fg="white", bg="gray", font=("Arial", 7, "bold"),
                                                     width=8, relief="raised")
-        self.labels['operation_state'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['operation_state'].pack(side=tk.RIGHT)
+        
+        # 초기기동 여부
+        initial_startup_frame = ttk.Frame(cooling_frame)
+        initial_startup_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        initial_startup_frame.columnconfigure(0, weight=1)
+        ttk.Label(initial_startup_frame, text="초기기동:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
+        self.labels['initial_startup'] = tk.Label(initial_startup_frame, text="일반기동", 
+                                                  fg="white", bg="blue", font=("Arial", 7, "bold"),
+                                                  width=8, relief="raised")
+        self.labels['initial_startup'].pack(side=tk.RIGHT)
         
         # 목표 RPS (입력 가능)
         target_rps_frame = ttk.Frame(cooling_frame)
-        target_rps_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.columnconfigure(0, weight=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         vcmd_rps = (self.root.register(self._validate_rps), '%P')
         self.labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 8), 
                                              width=6, validate='key', validatecommand=vcmd_rps,
                                              state='readonly')
         self.labels['target_rps'].insert(0, "0")
-        self.labels['target_rps'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['target_rps'].pack(side=tk.RIGHT)
         
         # ON 온도 (입력 가능)
         on_temp_frame = ttk.Frame(cooling_frame)
-        on_temp_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        on_temp_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        on_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(on_temp_frame, text="ON 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
         
         vcmd_temp = (self.root.register(self._validate_number), '%P')
-        self.labels['on_temp'] = tk.Entry(on_temp_frame, font=("Arial", 8), 
+        temp_unit_frame = ttk.Frame(on_temp_frame)
+        temp_unit_frame.pack(side=tk.RIGHT)
+        self.labels['on_temp'] = tk.Entry(temp_unit_frame, font=("Arial", 8), 
                                             width=6, validate='key', validatecommand=vcmd_temp,
                                             state='readonly')
         self.labels['on_temp'].insert(0, "0")
-        self.labels['on_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(on_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['on_temp'].pack(side=tk.LEFT)
+        ttk.Label(temp_unit_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # OFF 온도 (입력 가능)
         off_temp_frame = ttk.Frame(cooling_frame)
-        off_temp_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        off_temp_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        off_temp_frame.columnconfigure(0, weight=1)
         ttk.Label(off_temp_frame, text="OFF 온도:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.labels['off_temp'] = tk.Entry(off_temp_frame, font=("Arial", 8), 
+        temp_unit_frame2 = ttk.Frame(off_temp_frame)
+        temp_unit_frame2.pack(side=tk.RIGHT)
+        self.labels['off_temp'] = tk.Entry(temp_unit_frame2, font=("Arial", 8), 
                                             width=6, validate='key', validatecommand=vcmd_temp,
                                             state='readonly')
         self.labels['off_temp'].insert(0, "0")
-        self.labels['off_temp'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(off_temp_frame, text="℃", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['off_temp'].pack(side=tk.LEFT)
+        ttk.Label(temp_unit_frame2, text="℃", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 냉각 추가시간 (입력 가능)
         add_time_frame = ttk.Frame(cooling_frame)
-        add_time_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        add_time_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
+        add_time_frame.columnconfigure(0, weight=1)
         ttk.Label(add_time_frame, text="추가시간:", font=("Arial", 8), width=8).pack(side=tk.LEFT)
-        self.labels['cooling_additional_time'] = tk.Entry(add_time_frame, font=("Arial", 8), 
+        time_unit_frame = ttk.Frame(add_time_frame)
+        time_unit_frame.pack(side=tk.RIGHT)
+        self.labels['cooling_additional_time'] = tk.Entry(time_unit_frame, font=("Arial", 8), 
                                                           width=6, validate='key', validatecommand=vcmd_temp,
                                                           state='readonly')
         self.labels['cooling_additional_time'].insert(0, "0")
-        self.labels['cooling_additional_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(add_time_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT)
+        self.labels['cooling_additional_time'].pack(side=tk.LEFT)
+        ttk.Label(time_unit_frame, text="초", font=("Arial", 8)).pack(side=tk.LEFT, padx=(2, 0))
         
         # CMD 0xB1 전송 버튼
         send_btn_frame = ttk.Frame(cooling_frame)
-        send_btn_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        send_btn_frame.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
         self.send_btn = ttk.Button(send_btn_frame, text="입력모드",
                                     command=self.send_control, state="disabled")
         self.send_btn.pack(fill=tk.X)
@@ -240,10 +262,17 @@ class CoolingSystem:
         """GUI 업데이트"""
         # 운전 상태 업데이트
         if 'operation_state' in self.labels:
-            if self.data['operation_state'] == 'GOING':
-                self.labels['operation_state'].config(text="GOING", bg="green")
+            if self.data['operation_state'] == 'GOING' or self.data['operation_state'] == '가동':
+                self.labels['operation_state'].config(text="가동", bg="green")
             else:
-                self.labels['operation_state'].config(text="STOP", bg="red")
+                self.labels['operation_state'].config(text="대기", bg="gray")
+        
+        # 초기기동 여부 업데이트
+        if 'initial_startup' in self.labels:
+            if self.data.get('initial_startup', False):
+                self.labels['initial_startup'].config(text="초기기동", bg="orange")
+            else:
+                self.labels['initial_startup'].config(text="일반기동", bg="blue")
         
         # 입력 모드가 아닐 때만 Entry 위젯 업데이트
         if not self.edit_mode:

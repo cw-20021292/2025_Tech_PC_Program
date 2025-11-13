@@ -19,8 +19,11 @@ from matplotlib.figure import Figure
 plt.rcParams['font.family'] = ['Malgun Gothic', 'DejaVu Sans', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 
-from communication import SerialCommunication, DataParser
-from systems import RefrigerationSystem
+from communication import SerialCommunication, DataParser, StatusResponseHandler
+from systems import (
+    RefrigerationSystem, CoolingSystem, HVACSystem, IcemakingSystem,
+    DrainTankSystem, DrainPumpSystem, ValveSystem
+)
 import constants
 from excel_sheet_selector import ExcelSheetSelector
 
@@ -35,96 +38,25 @@ class MainGUI:
         # 통신 모듈 초기화
         self.comm = SerialCommunication()
         self.data_parser = DataParser()
+        self.status_handler = StatusResponseHandler(self.comm.protocol)
         
-        # 데이터 저장소
-        self.nos_valve_states = {i: False for i in range(1, 6)}
-        self.feed_valve_states = {i: False for i in range(1, 16)}
+        # 시스템 클래스 인스턴스화
+        self.cooling_system = CoolingSystem(self.root, self.comm, self.log_communication)
+        self.hvac_system = HVACSystem(self.root, self.comm, self.log_communication)
+        self.icemaking_system = IcemakingSystem(self.root, self.comm, self.log_communication, 
+                                                apply_table_callback=self.apply_icemaking_table)
+        self.refrigeration_system = RefrigerationSystem(self.root, self.comm, self.log_communication)
+        self.drain_tank_system = DrainTankSystem(self.root, self.comm, self.log_communication)
+        self.drain_pump_system = DrainPumpSystem(self.root, self.comm, self.log_communication)
+        self.valve_system = ValveSystem(self.root, self.comm, self.log_communication)
         
+        # 센서 데이터 (시스템 클래스에 없는 경우를 위한 임시 저장소)
         self.sensor_data = {
             'outdoor_temp1': 0, 'outdoor_temp2': 0,
             'purified_temp': 0, 'cold_temp': 0,
             'hot_inlet_temp': 0, 'hot_internal_temp': 0,
             'hot_outlet_temp': 0
         }
-        
-        # 공조시스템
-        self.hvac_data = {
-            'refrigerant_valve_state_1': '핫가스',
-            'refrigerant_valve_state_2': '핫가스',
-            'compressor_state': '미동작',
-            'current_rps': 0,
-            'stabilization_time': 0,  # 안정화 시간
-            'error_code': 0,
-            'dc_fan1': 'OFF',
-            'dc_fan2': 'OFF'
-        }
-
-        # 공조시스템 입력 모드 상태
-        self.hvac_edit_mode = False  # 입력 모드 활성화 여부
-        self.hvac_temp_data = {
-            'compressor_state': '미동작',  # 동작/미동작
-            'dc_fan1': 'OFF',  # ON/OFF
-            'dc_fan2': 'OFF'   # ON/OFF
-        }
-        
-        # 냉각시스템
-        self.cooling_data = {
-            'operation_state': 'STOP',
-            'initial_startup': False,      # 초기기동 여부 (1:초기기동, 0:일반기동)
-            'target_rps': 0,               # 목표 RPS (냉각시스템)
-            'on_temp': 0,
-            'off_temp': 0,
-            'cooling_additional_time': 0
-        }
-
-        # 냉각 입력 모드 상태 추가
-        self.cooling_edit_mode = False  # 입력 모드 활성화 여부
-        
-        # 냉각 입력 필드가 포커스 중인지 추적
-        self.cooling_input_focus = {
-            'on_temp': False,
-            'off_temp': False,
-            'cooling_additional_time': False
-        }
-        
-        # 제빙시스템
-        self.icemaking_data = {
-            'operation': '대기',
-            'ice_step': 0,                # 제빙 STEP (ice_step 값에 따라 operation 상태 결정)
-            'target_rps': 0,               # 목표 RPS
-            'icemaking_time': 0,
-            'water_capacity': 0,
-            'swing_on_time': 0,
-            'swing_off_time': 0,
-            'tray_position': 0,           # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
-            'ice_jam_state': 0            # 얼음걸림 상태 (0:없음, 1:걸림)
-        }
-
-        # 제빙 입력 모드 상태 추가 (냉각 입력 모드 변수 뒤에)
-        self.icemaking_edit_mode = False  # 입력 모드 활성화 여부
-        self.icemaking_temp_data = {
-            'operation': '대기',  # 대기/동작
-            'target_rps': 0,      # 목표 RPS
-            'icemaking_time': 0,      # ms 단위 (0~65535)
-            'water_capacity': 0,      # Hz 단위 (0~65535)
-            'swing_on_time': 0,       # ms 단위 (0~255)
-            'swing_off_time': 0       # ms 단위 (0~255)
-        }
-        
-        # 드레인탱크
-        self.drain_tank_data = {
-            'low_level': '미감지',
-            'high_level': '미감지',
-            'water_level_state': '비어있음'
-        }
-        
-        # 드레인펌프
-        self.drain_pump_data = {
-            'operation_state': 'OFF'
-        }
-        
-        # 보냉시스템 모듈 초기화
-        self.refrigeration_system = RefrigerationSystem(self.root, self.comm, self.log_communication)
         
         # Excel Sheet 선택 모듈 초기화
         self.excel_sheet_selector = ExcelSheetSelector(self.root)
@@ -250,15 +182,24 @@ class MainGUI:
         self.create_graph_areas(top_frame)
         
         # 중단 영역 레이아웃 (시스템 제어)
-        self.create_cooling_area(middle_frame)
-        self.create_hvac_area(middle_frame)
-        self.create_icemaking_area(middle_frame)
-        self.refrigeration_system.create_widgets(middle_frame)  # 보냉시스템 추가
+        # 시스템 클래스의 create_widgets 메서드 사용
+        self.cooling_system.create_widgets(middle_frame)
+        self.hvac_system.create_widgets(middle_frame)
+        self.icemaking_system.create_widgets(middle_frame)
+        self.refrigeration_system.create_widgets(middle_frame)
         
         # 하단 영역 레이아웃 (밸브/센서)
-        self.create_valve_area(bottom_frame)
-        self.create_drain_tank_area(bottom_frame)
-        self.create_sensor_area(bottom_frame)
+        # 시스템 클래스의 create_widgets 메서드 사용
+        self.valve_system.create_widgets(bottom_frame, tab_type='freezing', row=0, column=0)
+        self.drain_tank_system.create_widgets(bottom_frame, row=0, column=1)
+        self.create_sensor_area(bottom_frame)  # 센서는 별도 처리 필요 (column=2)
+        
+        # 시스템 클래스의 레이블을 gui_main의 레이블 딕셔너리에 매핑
+        self.cooling_labels = self.cooling_system.labels
+        self.hvac_labels = self.hvac_system.labels
+        self.icemaking_labels = self.icemaking_system.labels
+        self.drain_tank_labels = self.drain_tank_system.labels
+        self.drain_pump_labels = self.drain_pump_system.labels
         
         # 프레임 확장 설정
         # 상단 프레임 (그래프 2개 가로 배치)
@@ -305,8 +246,8 @@ class MainGUI:
         # 상단 영역 레이아웃 (그래프 2개 가로 배치)
         self.create_graph_areas(top_frame)
         
-        # 중단 영역 레이아웃
-        self.create_valve_area(middle_frame)
+        # 중단 영역 레이아웃 (밸브 시스템 클래스 사용)
+        self.valve_system.create_widgets(middle_frame, tab_type='control')
         
         # 하단 영역 레이아웃
         self.create_control_sections(bottom_frame)
@@ -2103,23 +2044,10 @@ class MainGUI:
                 for btn in self.cmd_buttons.values():
                     btn.config(state="normal")
                 
-                # 냉각 제어 버튼 활성화
-                if hasattr(self, 'cooling_send_btn'):
-                    self.cooling_send_btn.config(state="normal")
-
-                # 공조 제어 버튼 활성화
-                if hasattr(self, 'hvac_send_btn'):
-                    self.hvac_send_btn.config(state="normal")
-
-                # 제빙 제어 버튼 활성화 추가
-                if hasattr(self, 'icemaking_send_btn'):
-                    self.icemaking_send_btn.config(state="normal")
-                
-                # 제빙테이블 적용 버튼 활성화
-                if hasattr(self, 'icemaking_table_btn'):
-                    self.icemaking_table_btn.config(state="normal")
-                
-                # 보냉 제어 버튼 활성화
+                # 각 시스템의 버튼 활성화 (set_connection_state 사용)
+                self.cooling_system.set_connection_state(True)
+                self.hvac_system.set_connection_state(True)
+                self.icemaking_system.set_connection_state(True)
                 self.refrigeration_system.set_connection_state(True)
                 
                 # Log 추출/삭제 버튼 활성화
@@ -2145,23 +2073,10 @@ class MainGUI:
                 for btn in self.cmd_buttons.values():
                     btn.config(state="disabled")
                 
-                # 냉각 제어 버튼 비활성화
-                if hasattr(self, 'cooling_send_btn'):
-                    self.cooling_send_btn.config(state="disabled")
-                
-                # 공조 제어 버튼 비활성화
-                if hasattr(self, 'hvac_send_btn'):
-                    self.hvac_send_btn.config(state="disabled")
-
-                # 제빙 제어 버튼 비활성화 추가
-                if hasattr(self, 'icemaking_send_btn'):
-                    self.icemaking_send_btn.config(state="disabled")
-                
-                # 제빙테이블 적용 버튼 비활성화
-                if hasattr(self, 'icemaking_table_btn'):
-                    self.icemaking_table_btn.config(state="disabled")
-                
-                # 보냉 제어 버튼 비활성화
+                # 각 시스템의 버튼 비활성화 (set_connection_state 사용)
+                self.cooling_system.set_connection_state(False)
+                self.hvac_system.set_connection_state(False)
+                self.icemaking_system.set_connection_state(False)
                 self.refrigeration_system.set_connection_state(False)
                 
                 # Log 추출/삭제 버튼 비활성화
@@ -2173,87 +2088,9 @@ class MainGUI:
                 self.log_communication("연결 해제됨", "orange")
     
     def send_valve_control(self, valve_num, valve_type):
-        """밸브 제어 CMD 0xA0 전송 (개별 밸브만 제어)"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        try:
-            # 현재 모든 밸브 상태를 DATA FIELD로 구성
-            # DATA 1~5: NOS 1~5 (1=CLOSE, 0=OPEN)
-            # DATA 6~20: FEED 1~15 (1=OPEN, 0=CLOSE)
-            data_field = bytearray(20)
-            
-            # 먼저 모든 밸브의 현재 상태를 data_field에 설정
-            # NOS 밸브 상태 설정 (DATA 1~5): 1=CLOSE, 0=OPEN
-            for i in range(1, 6):
-                data_field[i-1] = 0x01 if self.nos_valve_states.get(i, False) else 0x00
-            
-            # FEED 밸브 상태 설정 (DATA 6~20): 1=OPEN, 0=CLOSE
-            for i in range(1, 16):
-                # FEED는 반대: True(OPEN)이면 0x01, False(CLOSE)이면 0x00
-                data_field[5+i-1] = 0x01 if self.feed_valve_states.get(i, False) else 0x00
-            
-            # 클릭한 밸브만 토글
-            if valve_type == 'NOS':
-                # NOS: 1=CLOSE, 0=OPEN
-                current_state = self.nos_valve_states.get(valve_num, False)
-                new_state_value = 0x00 if current_state else 0x01  # 토글
-                data_field[valve_num-1] = new_state_value
-                new_state_text = "CLOSE" if new_state_value == 0x01 else "OPEN"
-            else:  # FEED
-                # FEED: 1=OPEN, 0=CLOSE
-                current_state = self.feed_valve_states.get(valve_num, False)
-                new_state_value = 0x00 if current_state else 0x01  # 토글
-                data_field[5+valve_num-1] = new_state_value
-                new_state_text = "OPEN" if new_state_value == 0x01 else "CLOSE"
-            
-            # 로그에 데이터 필드 상세 정보 출력
-            valve_name = f"{valve_type}{valve_num}"
-            
-            # HEX 형식으로 데이터 표시
-            hex_data = " ".join([f"{b:02X}" for b in data_field])
-            
-            # NOS 밸브 상태 문자열 생성 (1=CLOSE, 0=OPEN)
-            nos_states = []
-            for i in range(1, 6):
-                state_char = 'C' if data_field[i-1] == 0x01 else 'O'
-                # 변경된 밸브는 강조
-                if valve_type == 'NOS' and i == valve_num:
-                    nos_states.append(f"[NOS{i}:{state_char}]")
-                else:
-                    nos_states.append(f"NOS{i}:{state_char}")
-            nos_str = " ".join(nos_states)
-            
-            # FEED 밸브 상태 문자열 생성 (1=OPEN, 0=CLOSE)
-            feed_states = []
-            for i in range(1, 16):
-                state_char = 'O' if data_field[5+i-1] == 0x01 else 'C'
-                # 변경된 밸브는 강조
-                if valve_type == 'FEED' and i == valve_num:
-                    feed_states.append(f"[F{i}:{state_char}]")
-                else:
-                    feed_states.append(f"F{i}:{state_char}")
-            feed_str = " ".join(feed_states)
-                        
-            # CMD 0xA0 패킷 전송
-            success, message = self.comm.send_packet(0xA0, bytes(data_field))
-            
-            if success:
-                self.log_communication(f"  전송 성공 (CMD 0xA0, 20바이트)", "green")
-                
-                # 로컬 상태 업데이트 (전송 성공 시)
-                if valve_type == 'NOS':
-                    # NOS: 1=CLOSE(True), 0=OPEN(False)
-                    self.nos_valve_states[valve_num] = (new_state_value == 0x01)
-                else:  # FEED
-                    # FEED: 1=OPEN(True), 0=CLOSE(False)
-                    self.feed_valve_states[valve_num] = (new_state_value == 0x01)
-            else:
-                self.log_communication(f"  전송 실패: {message}", "red")
-                
-        except Exception as e:
-            self.log_communication(f"밸브 제어 오류: {str(e)}", "red")
+        """밸브 제어 CMD 0xA0 전송 (개별 밸브만 제어) - valve_system 위임"""
+        # valve_system의 send_valve_control 메서드 사용
+        self.valve_system.send_valve_control(valve_num, valve_type)
     
     def send_cmd(self, cmd):
         """CMD 패킷 전송"""
@@ -2371,8 +2208,30 @@ class MainGUI:
             
             hex_data = " ".join([f"{b:02X}" for b in data_field]) if data_field else "없음"
             
-            # CMD 0x0F (상태응답) 처리
-            if cmd == 0x0F:
+            # CMD 0xF0 (공통 상태조회) 처리
+            if cmd == 0xF0:
+                # POLLING [메인 → PC] 공통 상태응답 처리
+                if tx_id == 0x02:  # 메인 → PC
+                    if self.debug_comm:
+                        pass
+                        # self.log_communication(f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X} (공통 상태조회)", "green")
+                        # self.log_communication(f"   데이터: {hex_data}", "gray")
+                    self.process_common_status_response(data_field, tx_id)
+                else:
+                    pass
+            # CMD 0xF1 (냉동상태조회) 처리
+            elif cmd == 0xF1:
+                # POLLING [메인 → PC] 냉동 상태응답 처리
+                if tx_id == 0x02:  # 메인 → PC
+                    if self.debug_comm:
+                        pass
+                        # self.log_communication(f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X} (냉동 상태조회)", "green")
+                        # self.log_communication(f"   데이터: {hex_data}", "gray")
+                    self.process_freezing_status_response(data_field, tx_id)
+                else:
+                    pass
+            # CMD 0x0F (구버전 호환용) 처리
+            elif cmd == 0x0F:
                 # POLLING [메인 → PC] 상태응답 처리
                 if tx_id == 0x02:  # 메인 → PC
                     if self.debug_comm:
@@ -2381,7 +2240,6 @@ class MainGUI:
                         # self.log_communication(f"   데이터: {hex_data}", "gray")
                     self.process_status_response(data_field, tx_id)
                 else:
-                    # Heartbeat는 로그에서 제외
                     pass
             else:
                 if self.debug_comm:
@@ -2397,9 +2255,12 @@ class MainGUI:
                     cooling_operation = data_field[2]  # 냉각 동작 (0: STOP, 1: GOING)
                     on_temp = self.comm.protocol.signed_byte_to_int(data_field[3])  # 냉각 ON 온도 (signed byte)
                     
-                    self.cooling_data['target_rps'] = target_rps
-                    self.cooling_data['operation_state'] = 'GOING' if cooling_operation == 1 else 'STOP'
-                    self.cooling_data['on_temp'] = on_temp
+                    cooling_data = {
+                        'target_rps': target_rps,
+                        'operation_state': 'GOING' if cooling_operation == 1 else 'STOP',
+                        'on_temp': on_temp
+                    }
+                    self.cooling_system.update_data(cooling_data)
                     
                     if self.debug_comm:
                         self.log_communication(f"  냉각 데이터 수신: 목표 RPS={target_rps}, "
@@ -2415,14 +2276,17 @@ class MainGUI:
                     swing_on = data_field[5]   # 1바이트 (ms)
                     swing_off = data_field[6]  # 1바이트 (ms)
                     
-                    self.icemaking_data['operation'] = '동작' if operation == 1 else '대기'
-                    self.icemaking_data['icemaking_time'] = icemaking_time
-                    self.icemaking_data['water_capacity'] = water_capacity
-                    self.icemaking_data['swing_on_time'] = swing_on
-                    self.icemaking_data['swing_off_time'] = swing_off
+                    icemaking_data = {
+                        'operation': '동작' if operation == 1 else '대기',
+                        'icemaking_time': icemaking_time,
+                        'water_capacity': water_capacity,
+                        'swing_on_time': swing_on,
+                        'swing_off_time': swing_off
+                    }
+                    self.icemaking_system.update_data(icemaking_data)
                     
                     if self.debug_comm:
-                        self.log_communication(f"  제빙 데이터 수신: 동작={self.icemaking_data['operation']}, "
+                        self.log_communication(f"  제빙 데이터 수신: 동작={icemaking_data['operation']}, "
                                             f"시간={icemaking_time}ms, 용량={water_capacity}Hz, "
                                             f"스윙 ON={swing_on}ms, OFF={swing_off}ms", "gray")
                 
@@ -2435,122 +2299,98 @@ class MainGUI:
         except Exception as e:
             self.log_communication(f"패킷 처리 오류: {str(e)}", "red")
     
-    def process_status_response(self, data_field, tx_id=None):
-        """CMD 0x0F (상태응답) 처리 - POLLING [메인 → PC] - 새로운 114바이트 구조"""
+    def process_common_status_response(self, data_field, tx_id=None):
+        """CMD 0xF0 (공통 상태조회) 처리 - 40바이트"""
         try:
             if not data_field or len(data_field) == 0:
                 return
             
-            # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
-            if tx_id != 0x02:  # MAIN → PC
-                device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
-                tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
-                self.log_communication(
-                    f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
-                    "orange"
-                )
+            if tx_id != 0x02:  # MAIN_ID
                 return
             
-            # 최소 114바이트 필요
-            if len(data_field) < 114:
+            if len(data_field) < 40:
                 if self.debug_comm:
                     self.log_communication(
-                        f"⚠ CMD 0x0F 데이터 필드 길이 부족: {len(data_field)}바이트 (예상: 114바이트)",
+                        f"⚠ CMD 0xF0 데이터 필드 길이 부족: {len(data_field)}바이트 (예상: 40바이트)",
                         "orange"
                     )
                 return
             
-            # ========== 1. 센서류 (DATA1-7, 인덱스 0-6) ==========
-            # 모든 센서 데이터는 0.1℃ 단위로 저장되어 있으므로 signed byte로 변환 후 10으로 나눠서 변환
-            if len(data_field) >= 7:
-                self.sensor_data['outdoor_temp1'] = float(self.comm.protocol.signed_byte_to_int(data_field[0]))     # DATA1: 외기온도 1
-                self.sensor_data['hot_inlet_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[1]))    # DATA2: 입수온도
-                self.sensor_data['purified_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[2]))     # DATA3: 정수온도
-                self.sensor_data['outdoor_temp2'] = float(self.comm.protocol.signed_byte_to_int(data_field[3]))     # DATA4: 외기온도 2
-                self.sensor_data['cold_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[4]))         # DATA5: 냉수온도
-                self.sensor_data['hot_internal_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[5])) # DATA6: 히터 내부온도
-                self.sensor_data['hot_outlet_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[6]))   # DATA7: 온수 출수온도
+            # communication.py의 StatusResponseHandler를 사용하여 데이터 파싱
+            parsed_data = self.status_handler.parse_common_status(data_field, tx_id)
             
-            # ========== 2. 공조시스템 (DATA14-22, 인덱스 13-21) ==========
-            if len(data_field) >= 22:
-                # DATA14 (인덱스 13): 냉매전환밸브 1 현재위치
-                valve1_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
-                self.hvac_data['refrigerant_valve_state_1'] = valve1_map.get(data_field[13], '핫가스')
-                
-                # DATA15 (인덱스 14): 냉매전환밸브 2 현재위치
-                valve2_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
-                self.hvac_data['refrigerant_valve_state_2'] = valve2_map.get(data_field[14], '핫가스')
-                
-                # DATA16 (인덱스 15): 압축기 출력상태 (1:가동, 0:정지)
-                self.hvac_data['compressor_state'] = '동작중' if data_field[15] == 1 else '미동작'
-                
-                # DATA17-18 (인덱스 16-17): 압축기 안정시간 (HIGH + LOW, 초 단위)
-                stabilization_time = (data_field[16] << 8) | data_field[17]
-                self.hvac_data['stabilization_time'] = stabilization_time
-                
-                # DATA19 (인덱스 18): 압축기 현재 RPS (37-75)
-                self.hvac_data['current_rps'] = data_field[18]
-                
-                # DATA20 (인덱스 19): 압축기 에러코드
-                self.hvac_data['error_code'] = data_field[19]
-                
-                # DATA21 (인덱스 20): 압축기 팬 출력상태 (1:가동, 0:정지)
-                self.hvac_data['dc_fan1'] = 'ON' if data_field[20] == 1 else 'OFF'
-                
-                # DATA22 (인덱스 21): 얼음탱크 팬 출력상태 (1:가동, 0:정지)
-                self.hvac_data['dc_fan2'] = 'ON' if data_field[21] == 1 else 'OFF'
+            # 센서 데이터 업데이트
+            if parsed_data.get('sensor_data'):
+                self.sensor_data.update(parsed_data['sensor_data'])
+                # 센서 데이터가 업데이트되면 그래프 데이터도 업데이트
+                self.update_all_graph_data()
             
-            # ========== 3. 냉각 데이터 (DATA29-34, 인덱스 28-33) ==========
-            if len(data_field) >= 34:
-                # DATA29 (인덱스 28): 운전상태 (1:운전, 0:정지)
-                self.cooling_data['operation_state'] = 'GOING' if data_field[28] == 1 else 'STOP'
-                
-                # DATA30 (인덱스 29): 초기 기동여부 (1:초기기동, 0:일반기동)
-                self.cooling_data['initial_startup'] = (data_field[29] == 1)
-                
-                # DATA31 (인덱스 30): 냉각용 목표 RPS (37-75)
-                self.cooling_data['target_rps'] = data_field[30]
-                
-                # DATA32 (인덱스 31): ON 온도 (0.1℃ 단위, signed byte)
-                # self.cooling_data['on_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[31])) / 10.0
-                self.cooling_data['on_temp'] = (data_field[31] / 10.0)
-                
-                # DATA33 (인덱스 32): OFF 온도 (0.1℃ 단위, signed byte)
-                # self.cooling_data['off_temp'] = float(self.comm.protocol.signed_byte_to_int(data_field[32])) / 10.0
-                self.cooling_data['off_temp'] = (data_field[32] / 10.0)
-                
-                # DATA34 (인덱스 33): 추가 기동시간 (ms 단위)
-                self.cooling_data['cooling_additional_time'] = (data_field[33] << 8) | data_field[34]
+            # 밸브 상태 업데이트
+            if parsed_data.get('valve_states'):
+                valve_states = parsed_data['valve_states']
+                if valve_states.get('nos'):
+                    self.valve_system.update_data(nos_states=valve_states['nos'], feed_states=None)
+                if valve_states.get('feed'):
+                    self.valve_system.update_data(nos_states=None, feed_states=valve_states['feed'])
             
-            # ========== 4. 제빙 데이터 (DATA40-49, 인덱스 39-48) ==========
-            if len(data_field) >= 49:
-                # DATA40 (인덱스 39): 제빙 STEP
-                ice_step = data_field[39]
-                
-                # ice_step 값을 저장하고 operation 상태 결정
-                self.icemaking_data['ice_step'] = ice_step
-                self.icemaking_data['operation'] = self._get_icemaking_operation_from_step(ice_step)
+        except Exception as e:
+            self.log_communication(f"공통 상태조회 처리 오류: {str(e)}", "red")
+    
+    def process_freezing_status_response(self, data_field, tx_id=None):
+        """CMD 0xF1 (냉동상태조회) 처리 - 76바이트"""
+        try:
+            if not data_field or len(data_field) == 0:
+                return
+            
+            if tx_id != 0x02:  # MAIN_ID
+                return
+            
+            if len(data_field) < 76:
+                if self.debug_comm:
+                    self.log_communication(
+                        f"⚠ CMD 0xF1 데이터 필드 길이 부족: {len(data_field)}바이트 (예상: 76바이트)",
+                        "orange"
+                    )
+                return
+            
+            # communication.py의 StatusResponseHandler를 사용하여 데이터 파싱
+            parsed_data = self.status_handler.parse_freezing_status(data_field, tx_id)
+            
+            # 각 시스템 클래스에 데이터 전달
+            if parsed_data.get('hvac_data'):
+                self.hvac_system.update_data(parsed_data['hvac_data'])
+            
+            if parsed_data.get('cooling_data'):
+                cooling_data = parsed_data['cooling_data'].copy()
+                # operation_state를 'GOING'/'STOP'에서 '가동'/'대기'로 변환 (기존 코드 호환성)
+                if cooling_data.get('operation_state') == '가동':
+                    cooling_data['operation_state'] = 'GOING'
+                elif cooling_data.get('operation_state') == '대기':
+                    cooling_data['operation_state'] = 'STOP'
+                self.cooling_system.update_data(cooling_data)
+            
+            if parsed_data.get('icemaking_data'):
+                icemaking_data = parsed_data['icemaking_data'].copy()
+                # ice_step에 따라 operation 상태 결정
+                ice_step = icemaking_data.get('ice_step', 0)
+                icemaking_data['operation'] = self._get_icemaking_operation_from_step(ice_step)
                 
                 # 제빙 STEP에 따른 Heartbeat 제어
                 if ice_step == 22:
-                    # 제빙 STEP이 22이면 Heartbeat 일시 중지
                     if not self.comm.heartbeat_paused:
                         self.comm.pause_heartbeat()
                         if self.debug_comm:
                             self.log_communication(
-                                f"  [제빙 STEP 22] Heartbeat 일시 중지 (12초 후 자동 재개 예정)",
+                                f"  [제빙 STEP 22] 상태조회 일시 중지 (12초 후 자동 재개 예정)",
                                 "orange"
                             )
                         
-                        # 기존 타이머가 있으면 취소
                         if self.heartbeat_resume_timer is not None:
                             self.heartbeat_resume_timer.cancel()
                         
-                        # 12초 후에 heartbeat 재개하는 타이머 설정
                         self.heartbeat_resume_timer = threading.Timer(12.0, self._resume_heartbeat_after_delay)
                         self.heartbeat_resume_timer.start()
                 else:
-                    # 제빙 STEP이 22가 아니면 기존 타이머 취소하고 즉시 Heartbeat 재개
                     if self.heartbeat_resume_timer is not None:
                         self.heartbeat_resume_timer.cancel()
                         self.heartbeat_resume_timer = None
@@ -2559,7 +2399,7 @@ class MainGUI:
                         self.comm.resume_heartbeat()
                         if self.debug_comm:
                             self.log_communication(
-                                f"  [제빙 STEP {ice_step}] Heartbeat 재개",
+                                f"  [제빙 STEP {ice_step}] 상태조회 재개",
                                 "orange"
                             )
                 
@@ -2571,7 +2411,6 @@ class MainGUI:
                             "purple"
                         )
                     
-                    # 입수온도(DATA2)에 해당하는 행 찾기
                     water_temps = self.freezing_table_data['water_temps']
                     hot_inlet_temp = self.sensor_data.get('hot_inlet_temp', 0)
                     
@@ -2610,94 +2449,180 @@ class MainGUI:
                             "orange"
                         )
                 
-                # DATA41 (인덱스 40): 제빙용 목표 RPS (37-75)
-                self.icemaking_data['target_rps'] = data_field[40]
-                
-                # DATA42-43 (인덱스 41-42): 제빙시간 (HIGH + LOW, ms 단위)
-                icemaking_time = (data_field[41] << 8) | data_field[42]
-                self.icemaking_data['icemaking_time'] = icemaking_time
-                
-                # DATA44-45 (인덱스 43-44): 입수 용량 (HIGH + LOW, Hz 단위)
-                water_capacity = (data_field[43] << 8) | data_field[44]
-                self.icemaking_data['water_capacity'] = water_capacity
-                
-                # DATA46 (인덱스 45): 스윙바 ON 시간 (0.1초 단위, 예: 6 = 0.6초 = 600ms)
-                swing_on_time_ms = int(data_field[45] * 100)  # 0.1초 -> ms 변환
-                self.icemaking_data['swing_on_time'] = swing_on_time_ms
-                
-                # DATA47 (인덱스 46): 스윙바 OFF 시간 (0.1초 단위)
-                swing_off_time_ms = int(data_field[46] * 100)  # 0.1초 -> ms 변환
-                self.icemaking_data['swing_off_time'] = swing_off_time_ms
-                
-                # DATA48 (인덱스 47): 제빙 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
-                self.icemaking_data['tray_position'] = data_field[47]
-                
-                # DATA49 (인덱스 48): 얼음걸림 상태 (0:없음, 1:걸림)
-                self.icemaking_data['ice_jam_state'] = data_field[48]
+                self.icemaking_system.update_data(icemaking_data)
             
-            # ========== 5. 보냉 데이터 (DATA60-64, 인덱스 59-63) ==========
-            if len(data_field) >= 64:
-                # 보냉시스템 모듈에 데이터 전달
-                refrigeration_data = {
-                    'target_rps': data_field[60],  # DATA61 (인덱스 60): 보냉용 목표 RPS
-                    'target_temp': float(self.comm.protocol.signed_byte_to_int(data_field[61])) / 10.0,  # DATA62 (인덱스 61): 보냉 목표온도 (0.1℃ 단위, signed byte)
-                    'target_first_temp': float(self.comm.protocol.signed_byte_to_int(data_field[62])) / 10.0,  # DATA63 (인덱스 62): 보냉 첫 목표온도 (0.1℃ 단위, signed byte)
-                }
-                # 트레이 위치는 보냉시스템에서 처리
-                tray_pos_map = {0: '제빙', 1: '중간', 2: '탈빙'}
-                refrigeration_data['cur_tray_position'] = tray_pos_map.get(data_field[63], '제빙')  # DATA64 (인덱스 63)
-                
-                self.refrigeration_system.update_data(refrigeration_data)
+            if parsed_data.get('refrigeration_data'):
+                self.refrigeration_system.update_data(parsed_data['refrigeration_data'])
             
-            # ========== 6. 밸브 상태 (DATA75-94, 인덱스 74-93) ==========
-            # DATA75-79 (인덱스 74-78): NOS 밸브 1-5 상태 (1:CLOSE, 0:OPEN)
-            if len(data_field) >= 79:
-                for i in range(1, 6):
-                    valve_state = data_field[73 + i]  # DATA75~79 (인덱스 74~78)
-                    self.nos_valve_states[i] = (valve_state == 1)
-                
-                # 밸브 시스템에 상태 업데이트
-                if hasattr(self, 'valve_system'):
-                    self.valve_system.update_data(
-                        nos_states={i: self.nos_valve_states[i] for i in range(1, 6)},
-                        feed_states=None
+            if parsed_data.get('drain_tank_data'):
+                self.drain_tank_system.update_data(parsed_data['drain_tank_data'])
+            
+            if parsed_data.get('drain_pump_data'):
+                self.drain_pump_system.update_data(parsed_data['drain_pump_data'])
+            
+        except Exception as e:
+            self.log_communication(f"냉동 상태조회 처리 오류: {str(e)}", "red")
+    
+    def process_status_response(self, data_field, tx_id=None):
+        """CMD 0x0F (상태응답) 처리 - POLLING [메인 → PC] - 새로운 114바이트 구조 (구버전 호환용)"""
+        try:
+            if not data_field or len(data_field) == 0:
+                return
+            
+            # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
+            if tx_id != 0x02:  # MAIN → PC
+                device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
+                tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
+                self.log_communication(
+                    f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
+                    "orange"
+                )
+                return
+            
+            # 최소 114바이트 필요
+            if len(data_field) < 114:
+                if self.debug_comm:
+                    self.log_communication(
+                        f"⚠ CMD 0x0F 데이터 필드 길이 부족: {len(data_field)}바이트 (예상: 114바이트)",
+                        "orange"
                     )
+                return
             
-            # DATA80-94 (인덱스 79-93): FEED 밸브 1-15 상태 (1:OPEN, 0:CLOSE)
-            if len(data_field) >= 94:
-                for i in range(1, 16):
-                    valve_state = data_field[78 + i]  # DATA80~94 (인덱스 79~93)
-                    self.feed_valve_states[i] = (valve_state == 1)
-                
-                # 밸브 시스템에 상태 업데이트
-                if hasattr(self, 'valve_system'):
-                    self.valve_system.update_data(
-                        nos_states=None,
-                        feed_states={i: self.feed_valve_states[i] for i in range(1, 16)}
-                    )
+            # communication.py의 StatusResponseHandler를 사용하여 데이터 파싱
+            parsed_data = self.status_handler.parse_status_response(data_field, tx_id)
             
-            # ========== 7. 드레인 탱크 (DATA100-103, 인덱스 99-102) ==========
-            if len(data_field) >= 103:
-                # DATA100 (인덱스 99): 드레인탱크 저수위 (1:감지, 0:미감지)
-                self.drain_tank_data['low_level'] = '감지' if data_field[99] == 1 else '미감지'
-                
-                # DATA101 (인덱스 100): 드레인탱크 만수위 (1:감지, 0:미감지)
-                self.drain_tank_data['high_level'] = '감지' if data_field[100] == 1 else '미감지'
-                
-                # DATA102 (인덱스 101): 수위 상태 (0:없음, 1:저수위, 2:중수위, 3:만수위, 4:에러)
-                water_level_map = {0: '비어있음', 1: '저수위', 2: '중수위', 3: '만수위', 4: '에러'}
-                self.drain_tank_data['water_level_state'] = water_level_map.get(data_field[101], '비어있음')
-                
-                # DATA103 (인덱스 102): 드레인 펌프 출력상태 (1:가동, 0:정지)
-                self.drain_pump_data['operation_state'] = 'ON' if data_field[102] == 1 else 'OFF'
+            # 센서 데이터 업데이트
+            if parsed_data.get('sensor_data'):
+                self.sensor_data.update(parsed_data['sensor_data'])
+                # 센서 데이터가 업데이트되면 그래프 데이터도 업데이트
+                self.update_all_graph_data()
             
-            # ========== 8. 기타 (DATA109, 인덱스 108) ==========
-            if len(data_field) >= 109:
-                # DATA109 (인덱스 108): 얼음탱크 커버 (1:열림, 0:닫힘)
-                # 주의: 이 필드는 현재 GUI에 있을 수 있음 (기타 섹션)
-                # tank_cover_data가 있다면 업데이트
-                if hasattr(self, 'tank_cover_data'):
-                    self.tank_cover_data['state'] = data_field[108]
+            # 각 시스템 클래스에 데이터 전달
+            if parsed_data.get('hvac_data'):
+                self.hvac_system.update_data(parsed_data['hvac_data'])
+            
+            if parsed_data.get('cooling_data'):
+                cooling_data = parsed_data['cooling_data'].copy()
+                # operation_state를 'GOING'/'STOP'에서 '가동'/'대기'로 변환 (기존 코드 호환성)
+                if cooling_data.get('operation_state') == '가동':
+                    cooling_data['operation_state'] = 'GOING'
+                elif cooling_data.get('operation_state') == '대기':
+                    cooling_data['operation_state'] = 'STOP'
+                self.cooling_system.update_data(cooling_data)
+            
+            if parsed_data.get('icemaking_data'):
+                icemaking_data = parsed_data['icemaking_data'].copy()
+                # ice_step에 따라 operation 상태 결정
+                ice_step = icemaking_data.get('ice_step', 0)
+                icemaking_data['operation'] = self._get_icemaking_operation_from_step(ice_step)
+                
+                # 제빙 STEP에 따른 Heartbeat 제어
+                if ice_step == 22:
+                    if not self.comm.heartbeat_paused:
+                        self.comm.pause_heartbeat()
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  [제빙 STEP 22] Heartbeat 일시 중지 (12초 후 자동 재개 예정)",
+                                "orange"
+                            )
+                        
+                        if self.heartbeat_resume_timer is not None:
+                            self.heartbeat_resume_timer.cancel()
+                        
+                        self.heartbeat_resume_timer = threading.Timer(12.0, self._resume_heartbeat_after_delay)
+                        self.heartbeat_resume_timer.start()
+                else:
+                    if self.heartbeat_resume_timer is not None:
+                        self.heartbeat_resume_timer.cancel()
+                        self.heartbeat_resume_timer = None
+                    
+                    if self.comm.heartbeat_paused:
+                        self.comm.resume_heartbeat()
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  [제빙 STEP {ice_step}] Heartbeat 재개",
+                                "orange"
+                            )
+                
+                # 제빙테이블 자동 전송 처리
+                if ice_step == 22 and self.freezing_table_loaded and self.freezing_table_data is not None:
+                    if self.debug_comm:
+                        self.log_communication(
+                            f"  제빙 STEP이 22입니다. 제빙테이블 자동 전송을 시작합니다...",
+                            "purple"
+                        )
+                    
+                    water_temps = self.freezing_table_data['water_temps']
+                    hot_inlet_temp = self.sensor_data.get('hot_inlet_temp', 0)
+                    
+                    water_temp_idx = None
+                    min_diff = float('inf')
+                    for idx, temp in enumerate(water_temps):
+                        diff = abs(temp - hot_inlet_temp)
+                        if diff < min_diff:
+                            min_diff = diff
+                            water_temp_idx = idx
+                    
+                    if water_temp_idx is not None:
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행 {water_temp_idx} (테이블 입수온도: {water_temps[water_temp_idx]}℃) 선택",
+                                "cyan"
+                            )
+                        
+                        success = self.send_freezing_table_row(water_temp_idx)
+                        
+                        if self.debug_comm:
+                            if success:
+                                self.log_communication(f"  제빙테이블 자동 전송 완료", "green")
+                            else:
+                                self.log_communication(f"  제빙테이블 자동 전송 실패", "red")
+                    else:
+                        if self.debug_comm:
+                            self.log_communication(
+                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행을 찾을 수 없습니다.",
+                                "orange"
+                            )
+                elif ice_step == 22 and not self.freezing_table_loaded:
+                    if self.debug_comm:
+                        self.log_communication(
+                            f"  제빙 STEP이 22이지만 제빙테이블이 로드되지 않았습니다.",
+                            "orange"
+                        )
+                
+                self.icemaking_system.update_data(icemaking_data)
+            
+            if parsed_data.get('refrigeration_data'):
+                self.refrigeration_system.update_data(parsed_data['refrigeration_data'])
+            
+            if parsed_data.get('drain_tank_data'):
+                self.drain_tank_system.update_data(parsed_data['drain_tank_data'])
+            
+            if parsed_data.get('drain_pump_data'):
+                self.drain_pump_system.update_data(parsed_data['drain_pump_data'])
+            
+            if parsed_data.get('valve_states'):
+                valve_states = parsed_data['valve_states']
+                if valve_states.get('nos'):
+                    self.valve_system.update_data(nos_states=valve_states['nos'], feed_states=None)
+                if valve_states.get('feed'):
+                    self.valve_system.update_data(nos_states=None, feed_states=valve_states['feed'])
+            
+            # 기존 코드와의 호환성을 위해 하드코딩된 변수도 업데이트 (점진적 마이그레이션)
+            # TODO: 나중에 완전히 제거
+            if parsed_data.get('hvac_data'):
+                # self.hvac_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
+                pass
+            
+            if parsed_data.get('cooling_data'):
+                # self.cooling_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
+                pass
+            
+            if parsed_data.get('icemaking_data'):
+                # self.icemaking_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
+                pass
+            
+            # 기존 하드코딩된 로직 제거 (위에서 StatusResponseHandler로 처리)
             
         except Exception as e:
             self.log_communication(f"상태응답 처리 오류: {str(e)}", "red")
@@ -2932,9 +2857,33 @@ class MainGUI:
         if item_key in self.graph2_active_items:
             self.graph2_active_items.remove(item_key)
             self.update_item_visual(item_key, False, graph_num=2)
+            # 그래프에서 제거되었음을 로그로 표시
+            sensor_names = {
+                'outdoor_temp1': '외기온도 1',
+                'outdoor_temp2': '외기온도 2',
+                'purified_temp': '정수온도',
+                'cold_temp': '냉수온도',
+                'hot_inlet_temp': '온수 입수온도',
+                'hot_internal_temp': '온수 내부온도',
+                'hot_outlet_temp': '온수 출수온도'
+            }
+            sensor_name = sensor_names.get(item_key, item_key)
+            self.log_communication(f"그래프 2에서 제거: {sensor_name}", "gray")
         else:
             self.graph2_active_items.add(item_key)
             self.update_item_visual(item_key, True, graph_num=2)
+            # 그래프에 추가되었음을 로그로 표시
+            sensor_names = {
+                'outdoor_temp1': '외기온도 1',
+                'outdoor_temp2': '외기온도 2',
+                'purified_temp': '정수온도',
+                'cold_temp': '냉수온도',
+                'hot_inlet_temp': '온수 입수온도',
+                'hot_internal_temp': '온수 내부온도',
+                'hot_outlet_temp': '온수 출수온도'
+            }
+            sensor_name = sensor_names.get(item_key, item_key)
+            self.log_communication(f"그래프 2에 추가: {sensor_name}", "blue")
     
     def update_item_visual(self, item_key, selected, graph_num):
         """선택된 항목의 시각적 표시 업데이트"""
@@ -2975,67 +2924,76 @@ class MainGUI:
         self.all_graph_data['cold_temp_sensor'].append(float(self.sensor_data.get('cold_temp', 0)))
         
         # 밸브 데이터
+        valve_data = self.valve_system.get_data()
         for i in range(1, 6):
-            valve_state = 1 if self.nos_valve_states.get(i, False) else 0
+            valve_state = 1 if valve_data['nos_valve_states'].get(i, False) else 0
             self.all_graph_data[f'nos_valve_{i}'].append(valve_state)
         
         for i in range(1, 16):
-            valve_state = 1 if self.feed_valve_states.get(i, False) else 0
+            valve_state = 1 if valve_data['feed_valve_states'].get(i, False) else 0
             self.all_graph_data[f'feed_valve_{i}'].append(valve_state)
         
         # 냉각 시스템
-        cooling_op = 1 if self.cooling_data.get('operation_state') == 'GOING' else 0
+        cooling_data = self.cooling_system.get_data()
+        cooling_op = 1 if cooling_data.get('operation_state') == 'GOING' or cooling_data.get('operation_state') == '가동' else 0
         self.all_graph_data['cooling_operation'].append(cooling_op)
-        self.all_graph_data['cooling_on_temp'].append(float(self.cooling_data.get('on_temp', 0)))
-        self.all_graph_data['cooling_off_temp'].append(float(self.cooling_data.get('off_temp', 0)))
+        self.all_graph_data['cooling_on_temp'].append(float(cooling_data.get('on_temp', 0)))
+        self.all_graph_data['cooling_off_temp'].append(float(cooling_data.get('off_temp', 0)))
         
         # 제빙 시스템
-        self.all_graph_data['icemaking_time'].append(float(self.icemaking_data.get('icemaking_time', 0)))
-        self.all_graph_data['icemaking_capacity'].append(float(self.icemaking_data.get('water_capacity', 0)))
+        icemaking_data = self.icemaking_system.get_data()
+        self.all_graph_data['icemaking_time'].append(float(icemaking_data.get('icemaking_time', 0)))
+        self.all_graph_data['icemaking_capacity'].append(float(icemaking_data.get('water_capacity', 0)))
         
         # 드레인
-        tank_level = 1 if self.drain_tank_data.get('high_level') == '감지' else 0
-        pump_state = 1 if self.drain_pump_data.get('operation_state') == 'ON' else 0
+        drain_tank_data = self.drain_tank_system.get_data()
+        drain_pump_data = self.drain_pump_system.get_data()
+        tank_level = 1 if drain_tank_data.get('high_level') == '감지' else 0
+        pump_state = 1 if drain_pump_data.get('operation_state') == 'ON' else 0
         self.all_graph_data['drain_tank_level'].append(tank_level)
         self.all_graph_data['drain_pump_state'].append(pump_state)
     
     def update_gui(self):
         """GUI 업데이트"""
+        # 밸브 시스템은 자체적으로 GUI를 업데이트하므로 여기서는 처리하지 않음
+        # 대신 valve_system의 update_gui 메서드를 호출하거나, 직접 레이블을 업데이트
         # NOS 밸브 상태 업데이트 (양쪽 탭 모두)
-        for valve_num, is_closed in self.nos_valve_states.items():
-            # 냉동검토용 탭
-            if valve_num in self.nos_valve_labels_freezing:
-                label = self.nos_valve_labels_freezing[valve_num]
-                if is_closed:
-                    label.config(text="CLOSE", bg="red")
-                else:
-                    label.config(text="OPEN", bg="blue")
-            
-            # 제어검토용 탭
-            if valve_num in self.nos_valve_labels_control:
-                label = self.nos_valve_labels_control[valve_num]
-                if is_closed:
-                    label.config(text="CLOSE", bg="red")
-                else:
-                    label.config(text="OPEN", bg="blue")
+        if hasattr(self.valve_system, 'nos_valve_states'):
+            for valve_num, is_closed in self.valve_system.nos_valve_states.items():
+                # 냉동검토용 탭
+                if hasattr(self.valve_system, 'nos_valve_labels') and valve_num in self.valve_system.nos_valve_labels:
+                    label = self.valve_system.nos_valve_labels[valve_num]
+                    if is_closed:
+                        label.config(text="CLOSE", bg="red")
+                    else:
+                        label.config(text="OPEN", bg="blue")
+                
+                # 제어검토용 탭
+                if hasattr(self.valve_system, 'nos_valve_labels_control') and valve_num in self.valve_system.nos_valve_labels_control:
+                    label = self.valve_system.nos_valve_labels_control[valve_num]
+                    if is_closed:
+                        label.config(text="CLOSE", bg="red")
+                    else:
+                        label.config(text="OPEN", bg="blue")
         
         # FEED 밸브 상태 업데이트 (양쪽 탭 모두)
-        for valve_num, is_open in self.feed_valve_states.items():
-            # 냉동검토용 탭
-            if valve_num in self.feed_valve_labels_freezing:
-                label = self.feed_valve_labels_freezing[valve_num]
-                if is_open:
-                    label.config(text="OPEN", bg="blue")
-                else:
-                    label.config(text="CLOSE", bg="red")
-            
-            # 제어검토용 탭
-            if valve_num in self.feed_valve_labels_control:
-                label = self.feed_valve_labels_control[valve_num]
-                if is_open:
-                    label.config(text="OPEN", bg="blue")
-                else:
-                    label.config(text="CLOSE", bg="red")
+        if hasattr(self.valve_system, 'feed_valve_states'):
+            for valve_num, is_open in self.valve_system.feed_valve_states.items():
+                # 냉동검토용 탭
+                if hasattr(self.valve_system, 'feed_valve_labels') and valve_num in self.valve_system.feed_valve_labels:
+                    label = self.valve_system.feed_valve_labels[valve_num]
+                    if is_open:
+                        label.config(text="OPEN", bg="blue")
+                    else:
+                        label.config(text="CLOSE", bg="red")
+                
+                # 제어검토용 탭
+                if hasattr(self.valve_system, 'feed_valve_labels_control') and valve_num in self.valve_system.feed_valve_labels_control:
+                    label = self.valve_system.feed_valve_labels_control[valve_num]
+                    if is_open:
+                        label.config(text="OPEN", bg="blue")
+                    else:
+                        label.config(text="CLOSE", bg="red")
         
         # 센서 데이터 업데이트
         for sensor_key, value in self.sensor_data.items():
@@ -3048,132 +3006,20 @@ class MainGUI:
                 except (ValueError, TypeError):
                     label.config(text="0.0")
         
-        # 냉각 시스템 상태 업데이트
-        for cooling_key, value in self.cooling_data.items():
-            if cooling_key in self.cooling_labels:
-                widget = self.cooling_labels[cooling_key]
-                if cooling_key == 'operation_state':
-                    # 운전 상태는 항상 업데이트
-                    if value == 'GOING':
-                        widget.config(text="GOING", bg="green")
-                    else:
-                        widget.config(text="STOP", bg="red")
-                elif cooling_key == 'initial_startup':
-                    # 초기기동 여부는 항상 업데이트
-                    if value:
-                        widget.config(text="초기기동", bg="orange")
-                    else:
-                        widget.config(text="일반기동", bg="blue")
-                elif cooling_key == 'target_rps':
-                    # 목표 RPS는 입력 모드가 아닐 때만 업데이트 (Entry)
-                    if not self.cooling_edit_mode:
-                        current_value = widget.get()
-                        new_value = str(value)
-                        if current_value != new_value:
-                            widget.config(state='normal')
-                            widget.delete(0, tk.END)
-                            widget.insert(0, new_value)
-                            widget.config(state='readonly')
-                elif cooling_key in ['on_temp', 'off_temp', 'cooling_additional_time']:
-                    # 입력 모드가 아닐 때만 Entry 위젯 업데이트
-                    if not self.cooling_edit_mode:
-                        current_value = widget.get()
-                        new_value = str(value)
-                        if current_value != new_value:
-                            widget.config(state='normal')
-                            widget.delete(0, tk.END)
-                            widget.insert(0, new_value)
-                            widget.config(state='readonly')
+        # 냉각 시스템 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
+        self.cooling_system._update_gui()
 
-        # 공조시스템 상태 업데이트
-        for hvac_key, value in self.hvac_data.items():
-            if hvac_key in self.hvac_labels:
-                label = self.hvac_labels[hvac_key]
-                if hvac_key in ['refrigerant_valve_state_1', 'refrigerant_valve_state_2']:
-                    # 냉매전환밸브 상태는 항상 업데이트
-                    colors = {'핫가스': 'red', '제빙': 'blue', '냉각': 'green', '보냉': 'orange'}
-                    color = colors.get(value, 'gray')
-                    label.config(text=value, bg=color)
-                elif hvac_key == 'compressor_state':
-                    # 상태는 항상 업데이트 (하지만 입력 모드에서는 제어용 라벨 표시)
-                    if not self.hvac_edit_mode:
-                        if value == '동작중':
-                            label.config(text="동작중", bg="green")
-                        else:
-                            label.config(text="미동작", bg="gray")
-
-                elif hvac_key in ['dc_fan1', 'dc_fan2']:
-                    # 입력 모드가 아닐 때만 업데이트
-                    if not self.hvac_edit_mode:
-                        if value == 'ON':
-                            label.config(text="ON", bg="green")
-                        else:
-                            label.config(text="OFF", bg="gray")
-                elif hvac_key in ['error_code', 'current_rps', 'stabilization_time']:
-                    # 에러코드, 현재 RPS, 안정화 시간은 항상 업데이트
-                    label.config(text=str(value))
+        # 공조시스템 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
+        self.hvac_system._update_gui()
         
-        # 제빙 시스템 상태 업데이트 (입력 모드가 아닐 때만)
-        if not self.icemaking_edit_mode:
-            for ice_key, value in self.icemaking_data.items():
-                if ice_key in self.icemaking_labels:
-                    widget = self.icemaking_labels[ice_key]
-                    
-                    if ice_key == 'operation':
-                        # Label 위젯 - ice_step 값에 따라 상태와 색상 결정
-                        operation_text = value
-                        # ice_step에 따른 색상 매핑
-                        ice_step = self.icemaking_data.get('ice_step', 0)
-                        bg_color = self._get_icemaking_operation_color(ice_step)
-                        widget.config(text=operation_text, bg=bg_color)
-                    
-                    elif ice_key == 'tray_position':
-                        # 트레이 위치는 Label 위젯
-                        tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
-                        tray_pos_text = tray_pos_map.get(value, f'STEP {value}')
-                        tray_pos_colors = {0: 'blue', 1: 'green', 2: 'black', 3: 'red'}
-                        tray_pos_color = tray_pos_colors.get(value, 'gray')
-                        widget.config(text=tray_pos_text, bg=tray_pos_color)
-                    
-                    elif ice_key == 'ice_jam_state':
-                        # 얼음걸림 상태는 Label 위젯
-                        if value == 0:
-                            widget.config(text="없음", bg="black")
-                        else:
-                            widget.config(text="걸림", bg="red")
-                    
-                    elif ice_key in ['target_rps', 'icemaking_time', 'water_capacity', 'swing_on_time', 'swing_off_time']:
-                        # Entry 위젯 업데이트 (readonly 상태에서만)
-                        current_value = widget.get()
-                        new_value = str(value)
-                        if current_value != new_value:
-                            widget.config(state='normal')
-                            widget.delete(0, tk.END)
-                            widget.insert(0, new_value)
-                            widget.config(state='readonly')
+        # 제빙 시스템 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
+        self.icemaking_system._update_gui()
         
-        # 드레인 탱크 상태 업데이트
-        for tank_key, value in self.drain_tank_data.items():
-            if tank_key in self.drain_tank_labels:
-                label = self.drain_tank_labels[tank_key]
-                if tank_key in ['low_level', 'high_level']:
-                    if value == '감지':
-                        label.config(text="감지", bg="orange")
-                    else:
-                        label.config(text="미감지", bg="gray")
-                elif tank_key == 'water_level_state':
-                    colors = {'만수위': 'red', '저수위': 'orange', '비어있음': 'blue'}
-                    color = colors.get(value, 'gray')
-                    label.config(text=value, bg=color)
+        # 드레인 탱크 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
+        self.drain_tank_system._update_gui()
         
-        # 드레인 펌프 상태 업데이트
-        for pump_key, value in self.drain_pump_data.items():
-            if pump_key in self.drain_pump_labels:
-                label = self.drain_pump_labels[pump_key]
-                if value == 'ON':
-                    label.config(text="ON", bg="green")
-                else:
-                    label.config(text="OFF", bg="gray")
+        # 드레인 펌프 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
+        self.drain_pump_system._update_gui()
         
         
 
@@ -3189,114 +3035,39 @@ class MainGUI:
     
     def update_graphs(self):
         """선택된 항목들만 그래프에 표시"""
+        # 그래프 데이터가 없으면 업데이트하지 않음
         if len(self.all_graph_data['time']) < 2:
             return
         
+        # 그래프 2에 표시할 센서가 없으면 그래프를 그리지 않음
+        if not self.graph2_active_items:
+            # 그래프 2를 비워둠
+            if hasattr(self, 'pressure_ax_freezing'):
+                self.pressure_ax_freezing.clear()
+                self.pressure_ax_freezing.set_title("Selected Sensors (Graph 2 - Freezing)", fontsize=8, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.grid(True, alpha=0.3)
+                self.fig2_freezing.tight_layout()
+                try:
+                    self.canvas2_freezing.draw_idle()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'pressure_ax_control'):
+                self.pressure_ax_control.clear()
+                self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.grid(True, alpha=0.3)
+                self.fig2_control.tight_layout()
+                try:
+                    self.canvas2_control.draw_idle()
+                except Exception:
+                    pass
+        
         try:
             times = list(self.all_graph_data['time'])
-            
-            # 냉동검토용 탭의 그래프 1 업데이트
-            if hasattr(self, 'temp_ax_freezing'):
-                self.temp_ax_freezing.clear()
-                self.temp_ax_freezing.set_title("Selected Items (Graph 1 - Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_freezing.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.temp_ax_freezing.grid(True, alpha=0.3)
-                
-                colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-                color_idx = 0
-                
-                for item_key in self.graph1_active_items:
-                    if item_key in self.all_graph_data and len(self.all_graph_data[item_key]) > 0:
-                        values = list(self.all_graph_data[item_key])
-                        color = colors[color_idx % len(colors)]
-                        
-                        if item_key.startswith('nos_valve_'):
-                            label = f"NOS{item_key.split('_')[2]}"
-                        elif item_key.startswith('feed_valve_'):
-                            label = f"FEED{item_key.split('_')[2]}"
-                        elif item_key == 'cooling_operation':
-                            label = "Cooling Op"
-                        elif item_key == 'cooling_on_temp':
-                            label = "Cool ON Temp"
-                        elif item_key == 'cooling_off_temp':
-                            label = "Cool OFF Temp"
-                        elif item_key == 'icemaking_time':
-                            label = "Ice Time"
-                        elif item_key == 'icemaking_capacity':
-                            label = "Ice Capacity"
-                        elif item_key == 'drain_tank_level':
-                            label = "Tank Level"
-                        elif item_key == 'drain_pump_state':
-                            label = "Pump State"
-                        else:
-                            label = item_key
-                        
-                        self.temp_ax_freezing.plot(times, values, color=color, label=label, linewidth=1.5)
-                        color_idx += 1
-                
-                if self.graph1_active_items:
-                    self.temp_ax_freezing.legend(fontsize=6)
-                
-                self.fig1_freezing.tight_layout()
-                try:
-                    self.canvas1_freezing.draw_idle()
-                except Exception:
-                    pass
-
-            # 냉각 시스템 상태 업데이트 (입력 모드가 아닐 때만)
-            if not self.cooling_edit_mode:  # 입력 모드가 아닐 때만 업데이트
-                for cooling_key, value in self.cooling_data.items():
-                    if cooling_key in self.cooling_labels:
-                        widget = self.cooling_labels[cooling_key]
-                        if cooling_key == 'operation_state':
-                            # 운전 상태는 Label
-                            if value == 'GOING':
-                                widget.config(text="GOING", bg="green")
-                            else:
-                                widget.config(text="STOP", bg="red")
-                        elif cooling_key in ['on_temp', 'off_temp', 'cooling_additional_time']:
-                            # Entry 위젯 업데이트 (readonly 상태에서만)
-                            current_value = widget.get()
-                            new_value = str(value)
-                            if current_value != new_value:
-                                widget.config(state='normal')
-                                widget.delete(0, tk.END)
-                                widget.insert(0, new_value)
-                                widget.config(state='readonly')
-            
-            # 제어검토용 탭의 그래프 1 업데이트
-            if hasattr(self, 'temp_ax_control'):
-                self.temp_ax_control.clear()
-                self.temp_ax_control.set_title("Selected Items (Graph 1 - Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_control.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.temp_ax_control.grid(True, alpha=0.3)
-                
-                colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-                color_idx = 0
-                
-                for item_key in self.graph1_active_items:
-                    if item_key in self.all_graph_data and len(self.all_graph_data[item_key]) > 0:
-                        values = list(self.all_graph_data[item_key])
-                        color = colors[color_idx % len(colors)]
-                        
-                        if item_key.startswith('nos_valve_'):
-                            label = f"NOS{item_key.split('_')[2]}"
-                        elif item_key.startswith('feed_valve_'):
-                            label = f"FEED{item_key.split('_')[2]}"
-                        else:
-                            label = item_key
-                        
-                        self.temp_ax_control.plot(times, values, color=color, label=label, linewidth=1.5)
-                        color_idx += 1
-                
-                if self.graph1_active_items:
-                    self.temp_ax_control.legend(fontsize=6)
-                
-                self.fig1_control.tight_layout()
-                try:
-                    self.canvas1_control.draw_idle()
-                except Exception:
-                    pass
             
             # 냉동검토용 탭의 그래프 2 업데이트
             if hasattr(self, 'pressure_ax_freezing'):
@@ -3313,7 +3084,17 @@ class MainGUI:
                     data_key = 'cold_temp_sensor' if sensor_key == 'cold_temp' else sensor_key
                     
                     if data_key in self.all_graph_data and len(self.all_graph_data[data_key]) > 0:
+                        # times와 values의 길이가 같아야 함
                         values = list(self.all_graph_data[data_key])
+                        if len(values) != len(times):
+                            # 길이가 다르면 짧은 쪽에 맞춤
+                            min_len = min(len(times), len(values))
+                            times_plot = times[-min_len:] if len(times) > min_len else times
+                            values_plot = values[-min_len:] if len(values) > min_len else values
+                        else:
+                            times_plot = times
+                            values_plot = values
+                        
                         color = sensor_colors[color_idx % len(sensor_colors)]
                         
                         sensor_labels = {
@@ -3327,7 +3108,7 @@ class MainGUI:
                         }
                         label = sensor_labels.get(sensor_key, sensor_key)
                         
-                        self.pressure_ax_freezing.plot(times, values, color=color, label=label, linewidth=1.5)
+                        self.pressure_ax_freezing.plot(times_plot, values_plot, color=color, label=label, linewidth=1.5)
                         color_idx += 1
                 
                 if self.graph2_active_items:
@@ -3354,7 +3135,17 @@ class MainGUI:
                     data_key = 'cold_temp_sensor' if sensor_key == 'cold_temp' else sensor_key
                     
                     if data_key in self.all_graph_data and len(self.all_graph_data[data_key]) > 0:
+                        # times와 values의 길이가 같아야 함
                         values = list(self.all_graph_data[data_key])
+                        if len(values) != len(times):
+                            # 길이가 다르면 짧은 쪽에 맞춤
+                            min_len = min(len(times), len(values))
+                            times_plot = times[-min_len:] if len(times) > min_len else times
+                            values_plot = values[-min_len:] if len(values) > min_len else values
+                        else:
+                            times_plot = times
+                            values_plot = values
+                        
                         color = sensor_colors[color_idx % len(sensor_colors)]
                         
                         sensor_labels = {
@@ -3368,7 +3159,7 @@ class MainGUI:
                         }
                         label = sensor_labels.get(sensor_key, sensor_key)
                         
-                        self.pressure_ax_control.plot(times, values, color=color, label=label, linewidth=1.5)
+                        self.pressure_ax_control.plot(times_plot, values_plot, color=color, label=label, linewidth=1.5)
                         color_idx += 1
                 
                 if self.graph2_active_items:

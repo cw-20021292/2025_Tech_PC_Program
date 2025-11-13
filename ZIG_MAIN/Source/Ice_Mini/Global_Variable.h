@@ -2337,32 +2337,6 @@ typedef enum
 	HOT_SET_TEMP____100oC,
 }HOT_TEMP_LEVEL;
 
-// ���������? �������� ��Ŷ ���� 2025-11-10 @CH.PARK
-#define WORK_STX        0x02
-#define WORK_ETX        0x03
-#define WORK_ID_PC      0x01
-#define WORK_ID_MAIN    0x02
-#define WORK_ID_FRONT   0x03
-
-#define WORK_CMD_HEARTBEAT                  0x0F     // ��Ʈ��Ʈ ��û
-#define WORK_CMD_VALVE_CHANGE               0xA0     // ���? ���� ���� ��û
-#define WORK_CMD_DRAIN_PUMP_CHANGE          0xA1     // �巹�� ���� ���? ���� ��û
-#define WORK_CMD_COOLING_SYSTEM_CHANGE      0xB0     // �����ý��� ���� ��û
-#define WORK_CMD_COOLING_RUN_CHANGE         0xB1     // �ð����� ���� ��û
-#define WORK_CMD_FREEZING_RUN_CHANGE        0xB2     // �������� ���� ��û
-#define WORK_CMD_FREEZING_TABLE_CHANGE      0xB3     // �������̺� ���� ��û
-#define WORK_CMD_COOLING_TABLE_CHANGE       0xB4     // ���ÿ��� ���� ��û
-#define WORK_CMD_SENSOR_CHANGE              0xC0     // ������ ���� ��û
-
-#define WORK_PACKET_BASIC_LENGTH            7
-typedef enum
-{
-    WORK_CMD_HEARTBEAT_LENGTH = 114,
-    WORK_CMD_VALVE_CHANGE_LENGTH = 6,
-    WORK_CMD_DRAIN_PUMP_CHANGE_LENGTH = 6,
-    WORK_CMD_COOLING_SYSTEM_CHANGE_LENGTH = 6,
-    WORK_CMD_COOLING_RUN_CHANGE_LENGTH = 6,
-} WORK_CMD_LENGTH;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////

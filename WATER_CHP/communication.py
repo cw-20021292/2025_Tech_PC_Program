@@ -23,9 +23,12 @@ class ProtocolHandler:
     FRONT_ID = 0x03
     
     # CMD와 DATA FIELD LENGTH 매핑 (PC → 메인)
+    # 주의: 0xF0, 0xF1은 PC → MAIN으로 보낼 때는 Datafield Length가 0
+    #       MAIN → PC로 올 때는 각각 40바이트, 76바이트
     CMD_LENGTH_MAP = {
-        0x0F: 0,   # Heartbeat
-        0xF0: 0,   # 상태조회 (POLLING)
+        0xF0: 0,   # 공통 상태조회 (PC → MAIN: 0바이트, MAIN → PC: 40바이트)
+        0xF1: 0,   # 냉동상태조회 (PC → MAIN: 0바이트, MAIN → PC: 76바이트)
+        0x0F: 114, # Heartbeat/Status Response (MAIN → PC, 114바이트) - 구버전 호환용
         0xA0: 20,  # 밸브 부하 변경 (DATA1~5: NOS 밸브, DATA6~20: FEED 밸브)
         0xA1: 1,   # 드레인 펌프 출력 변경
         0xB0: 4,   # 공조시스템
@@ -132,9 +135,11 @@ class ProtocolHandler:
         
         return bytes(packet)
     
-    def create_heartbeat_packet(self, tx_id=PC_ID):
-        """CMD 0x0F (Heartbeat) 패킷 생성 (RX ID 제거)"""
-        return self.create_packet(tx_id, 0x0F)
+    def create_heartbeat_packet(self, tx_id=None, cmd=0xF0):
+        """상태조회 패킷 생성 (CMD 0xF0 또는 0xF1)"""
+        if tx_id is None:
+            tx_id = ProtocolHandler.PC_ID
+        return self.create_packet(tx_id, cmd)
     
     def parse_packet(self, packet_data):
         """패킷 파싱 (RX ID 제거) - 에러 정보 포함"""
@@ -451,39 +456,43 @@ class SerialCommunication:
             return False, error_msg
     
     def start_heartbeat(self):
-        """Heartbeat 전송 시작 (CMD 0x0F)"""
+        """상태조회 전송 시작 (CMD 0xF0, 0xF1 순차 전송)"""
         self.heartbeat_active = True
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
         self.heartbeat_thread.start()
-        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 200ms 간격)"))
+        self.status_queue.put(('SYSTEM', "상태조회 시작 (CMD 0xF0/0xF1, 200ms 간격)"))
     
     def stop_heartbeat(self):
-        """Heartbeat 전송 중지"""
+        """상태조회 전송 중지"""
         self.heartbeat_active = False
         if self.heartbeat_thread and self.heartbeat_thread.is_alive():
             self.heartbeat_thread.join(timeout=1.0)
-        self.status_queue.put(('SYSTEM', "Heartbeat 중지"))
+        self.status_queue.put(('SYSTEM', "상태조회 중지"))
     
     def pause_heartbeat(self):
-        """Heartbeat 일시 중지 (CMD 0xB3 전송 중 사용)"""
+        """상태조회 일시 중지 (CMD 0xB3 전송 중 사용)"""
         self.heartbeat_paused = True
     
     def resume_heartbeat(self):
-        """Heartbeat 재개"""
+        """상태조회 재개"""
         self.heartbeat_paused = False
     
     def _heartbeat_worker(self):
-        """Heartbeat 전송 작업자"""
+        """상태조회 전송 작업자 (CMD 0xF0과 0xF1을 순차 전송)"""
+        current_cmd = 0xF0  # 0xF0부터 시작
         while self.heartbeat_active and self.is_connected:
             try:
-                # Heartbeat가 일시 중지되었으면 대기
+                # 상태조회가 일시 중지되었으면 대기
                 if not self.heartbeat_paused:
-                    packet = self.protocol.create_heartbeat_packet()
+                    # CMD 0xF0과 0xF1을 순차 전송
+                    packet = self.protocol.create_heartbeat_packet(cmd=current_cmd)
                     self.send_queue.put(packet)
+                    # 다음 CMD로 전환 (0xF0 <-> 0xF1)
+                    current_cmd = 0xF1 if current_cmd == 0xF0 else 0xF0
                 time.sleep(self.heartbeat_interval)
             except Exception as e:
                 if self.heartbeat_active:
-                    self.status_queue.put(('ERROR', f"Heartbeat 오류: {str(e)}"))
+                    self.status_queue.put(('ERROR', f"상태조회 전송 오류: {str(e)}"))
                 break
     
     def send_packet(self, cmd, data_field=None, tx_id=None):
@@ -650,157 +659,322 @@ class DataParser:
         sensor_data = {}
         # 파싱 로직은 기존과 동일
         return sensor_data
+
+
+class StatusResponseHandler:
+    """CMD 0x0F (상태응답) 데이터 처리 클래스"""
     
-    def __init__(self):
-        self.receive_buffer = bytearray()
-    
-    def calculate_crc16(self, data):
+    def __init__(self, protocol_handler):
         """
-        CRC16-CCITT 계산 (STX ~ DATA FIELD)
-        초기값: 0x0000
-        다항식: 0x1021
+        Args:
+            protocol_handler: ProtocolHandler 인스턴스
         """
-        wCRCin = 0x0000  # 초기값 변경: 0xFFFF -> 0x0000
-        wCPoly = 0x1021
-        
-        for wChar in data:
-            wCRCin ^= (wChar << 8)
-            for i in range(8):
-                if wCRCin & 0x8000:
-                    wCRCin = (wCRCin << 1) ^ wCPoly
-                else:
-                    wCRCin = wCRCin << 1
-                wCRCin &= 0xFFFF
-        return wCRCin
+        self.protocol = protocol_handler
     
-    def create_packet(self, tx_id, cmd, data_field=None):
+    def parse_common_status(self, data_field, tx_id=None):
         """
-        프로토콜 패킷 생성
-        STX + TX ID + CMD + DATA FIELD LENGTH + DATA FIELD + CRC16 + ETX
+        CMD 0xF0 (공통 상태조회) 데이터 파싱 - 40바이트
+        
+        Datafield 1-13: 센서 데이터
+        Datafield 14-38: 밸브 상태 데이터
+        Datafield 39: 필터리드 (1: 감지 / 0: 미감지)
+        Datafield 40: 전면커버 (1: 감지 / 0: 미감지)
+        
+        Returns:
+            dict: 파싱된 데이터를 담은 딕셔너리
         """
-        if cmd not in self.CMD_LENGTH_MAP:
-            raise ValueError(f"지원하지 않는 CMD: 0x{cmd:02X}")
+        result = {
+            'sensor_data': {},
+            'valve_states': {'nos': {}, 'feed': {}},
+            'filter_detected': False,
+            'front_cover_detected': False
+        }
         
-        expected_length = self.CMD_LENGTH_MAP[cmd]
+        if not data_field or len(data_field) == 0:
+            return result
         
-        # DATA FIELD 검증
-        if data_field is None:
-            data_field = bytes(expected_length)
-        elif len(data_field) != expected_length:
-            raise ValueError(f"CMD 0x{cmd:02X}의 DATA FIELD는 {expected_length}바이트여야 합니다")
+        if tx_id != 0x02:  # MAIN_ID
+            return result
         
-        # 패킷 구성 (RX ID 제거)
-        packet = bytearray()
-        packet.append(self.STX)
-        packet.append(tx_id)
-        packet.append(cmd)
-        packet.append(expected_length)
-        packet.extend(data_field)
-        
-        # CRC16 계산 (STX ~ DATA FIELD)
-        crc = self.calculate_crc16(packet)
-        # CRC를 ETX 앞에 CRC_HIGHBYTE와 CRC_LOWBYTE 순서로 추가
-        crc_high = (crc >> 8) & 0xFF  # CRC_HIGHBYTE
-        crc_low = crc & 0xFF          # CRC_LOWBYTE
-        packet.append(crc_high)
-        packet.append(crc_low)
-        
-        packet.append(self.ETX)
-        
-        return bytes(packet)
-    
-    def create_heartbeat_packet(self, tx_id=PC_ID):
-        """CMD 0x0F (Heartbeat) 패킷 생성 (RX ID 제거)"""
-        return self.create_packet(tx_id, 0x0F)
-    
-    def parse_packet(self, packet_data):
-        """패킷 파싱 (RX ID 제거)"""
-        if len(packet_data) < 7:  # 최소 패킷 크기 (RX ID 제거로 1바이트 감소)
-            return None
+        if len(data_field) < 40:
+            return result
         
         try:
-            stx = packet_data[0]
-            tx_id = packet_data[1]
-            cmd = packet_data[2]
-            data_length = packet_data[3]
+            # ========== 1. 센서류 (DATA1-13, 인덱스 0-12) ==========
+            if len(data_field) >= 13:
+                result['sensor_data'] = {
+                    'outdoor_temp1': float(self.protocol.signed_byte_to_int(data_field[0])),
+                    'hot_inlet_temp': float(self.protocol.signed_byte_to_int(data_field[1])),
+                    'purified_temp': float(self.protocol.signed_byte_to_int(data_field[2])),
+                    'outdoor_temp2': float(self.protocol.signed_byte_to_int(data_field[3])),
+                    'cold_temp': float(self.protocol.signed_byte_to_int(data_field[4])),
+                    'hot_internal_temp': float(self.protocol.signed_byte_to_int(data_field[5])),
+                    'hot_outlet_temp': float(self.protocol.signed_byte_to_int(data_field[6]))
+                }
             
-            expected_total = 6 + data_length  # STX + TX_ID + CMD + LEN + DATA + CRC16 + ETX
+            # ========== 2. 밸브 상태 (DATA14-38, 인덱스 13-37) ==========
+            # NOS 밸브 (1~5): DATA14-18 (인덱스 13-17)
+            if len(data_field) >= 18:
+                for i in range(1, 6):
+                    valve_state = data_field[12 + i]
+                    result['valve_states']['nos'][i] = (valve_state == 1)
             
-            if len(packet_data) != expected_total:
-                return None
+            # FEED 밸브 (1~15): DATA19-33 (인덱스 18-32)
+            if len(data_field) >= 33:
+                for i in range(1, 16):
+                    valve_state = data_field[17 + i]
+                    result['valve_states']['feed'][i] = (valve_state == 1)
             
-            data_field = packet_data[4:4+data_length]
-            # CRC_HIGHBYTE와 CRC_LOWBYTE를 읽어서 CRC 값 구성
-            crc_high = packet_data[4+data_length]
-            crc_low = packet_data[4+data_length+1]
-            crc_received = (crc_high << 8) | crc_low
-            etx = packet_data[-1]
+            # ========== 3. 필터리드 (DATA39, 인덱스 38) ==========
+            if len(data_field) >= 39:
+                result['filter_detected'] = (data_field[38] == 1)
             
-            # 검증
-            if stx != self.STX or etx != self.ETX:
-                return None
-            
-            # CRC 검증
-            crc_data = packet_data[:-3]  # STX ~ DATA FIELD
-            crc_calculated = self.calculate_crc16(crc_data)
-            
-            if crc_received != crc_calculated:
-                return None
-            
-            return {
-                'tx_id': tx_id,
-                'cmd': cmd,
-                'data_length': data_length,
-                'data_field': data_field,
-                'crc': crc_received
-            }
-            
+            # ========== 4. 전면커버 (DATA40, 인덱스 39) ==========
+            if len(data_field) >= 40:
+                result['front_cover_detected'] = (data_field[39] == 1)
+        
         except Exception:
-            return None
+            pass
+        
+        return result
     
-    def process_received_data(self, new_data):
-        """수신 버퍼에서 패킷 추출"""
-        self.receive_buffer.extend(new_data)
-        packets = []
+    def parse_freezing_status(self, data_field, tx_id=None):
+        """
+        CMD 0xF1 (냉동상태조회) 데이터 파싱 - 76바이트
         
-        while len(self.receive_buffer) > 0:
-            # STX 찾기
-            stx_index = -1
-            for i in range(len(self.receive_buffer)):
-                if self.receive_buffer[i] == self.STX:
-                    stx_index = i
-                    break
-            
-            if stx_index == -1:
-                self.receive_buffer.clear()
-                break
-            
-            # STX 이전 데이터 제거
-            if stx_index > 0:
-                self.receive_buffer = self.receive_buffer[stx_index:]
-            
-            # 최소 헤더 크기 확인 (STX + TX + RX + CMD + LEN)
-            if len(self.receive_buffer) < 5:
-                break
-            
-            data_length = self.receive_buffer[4]
-            expected_total = 7 + data_length
-            
-            if len(self.receive_buffer) < expected_total:
-                break
-            
-            # 패킷 추출 시도
-            packet_candidate = bytes(self.receive_buffer[:expected_total])
-            parsed = self.parse_packet(packet_candidate)
-            
-            if parsed:
-                packets.append(parsed)
-                self.receive_buffer = self.receive_buffer[expected_total:]
-            else:
-                # 파싱 실패시 STX 다음부터 다시 시도
-                self.receive_buffer = self.receive_buffer[1:]
+        Datafield 1-15: 공조시스템 데이터
+        Datafield 16-26: 냉각 데이터
+        Datafield 27-46: 제빙 데이터
+        Datafield 47-61: 보냉 데이터
+        Datafield 62-70: 드레인탱크 데이터
+        Datafield 71: 얼음탱크 커버 데이터
         
-        return packets
+        Returns:
+            dict: 파싱된 데이터를 담은 딕셔너리
+        """
+        result = {
+            'hvac_data': {},
+            'cooling_data': {},
+            'icemaking_data': {},
+            'refrigeration_data': {},
+            'drain_tank_data': {},
+            'drain_pump_data': {},
+            'tank_cover_data': {}
+        }
+        
+        if not data_field or len(data_field) == 0:
+            return result
+        
+        if tx_id != 0x02:  # MAIN_ID
+            return result
+        
+        if len(data_field) < 76:
+            return result
+        
+        try:
+            # ========== 1. 공조시스템 (DATA1-15, 인덱스 0-14) ==========
+            if len(data_field) >= 15:
+                valve1_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
+                valve2_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
+                
+                result['hvac_data'] = {
+                    'refrigerant_valve_state_1': valve1_map.get(data_field[0], '핫가스'),
+                    'refrigerant_valve_state_2': valve2_map.get(data_field[1], '핫가스'),
+                    'compressor_state': '동작중' if data_field[2] == 1 else '미동작',
+                    'stabilization_time': (data_field[3] << 8) | data_field[4],
+                    'current_rps': data_field[5],
+                    'error_code': data_field[6],
+                    'dc_fan1': 'ON' if data_field[7] == 1 else 'OFF',
+                    'dc_fan2': 'ON' if data_field[8] == 1 else 'OFF'
+                }
+            
+            # ========== 2. 냉각 데이터 (DATA16-26, 인덱스 15-25) ==========
+            if len(data_field) >= 26:
+                result['cooling_data'] = {
+                    'operation_state': '가동' if data_field[15] == 1 else '대기',
+                    'initial_startup': (data_field[16] == 1),
+                    'target_rps': data_field[17],
+                    'on_temp': data_field[18] / 10.0,
+                    'off_temp': data_field[19] / 10.0,
+                    'cooling_additional_time': (data_field[20] << 8) | data_field[21]
+                }
+            
+            # ========== 3. 제빙 데이터 (DATA27-46, 인덱스 26-45) ==========
+            if len(data_field) >= 46:
+                ice_step = data_field[26]
+                
+                result['icemaking_data'] = {
+                    'ice_step': ice_step,
+                    'target_rps': data_field[27],
+                    'icemaking_time': (data_field[28] << 8) | data_field[29],
+                    'water_capacity': (data_field[30] << 8) | data_field[31],
+                    'swing_on_time': int(data_field[32] * 100),
+                    'swing_off_time': int(data_field[33] * 100),
+                    'tray_position': data_field[34],
+                    'ice_jam_state': data_field[35]
+                }
+            
+            # ========== 4. 보냉 데이터 (DATA47-61, 인덱스 46-60) ==========
+            if len(data_field) >= 61:
+                tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
+                result['refrigeration_data'] = {
+                    'target_rps': data_field[46],
+                    'target_temp': float(self.protocol.signed_byte_to_int(data_field[47])) / 10.0,
+                    'target_first_temp': float(self.protocol.signed_byte_to_int(data_field[48])) / 10.0,
+                    'cur_tray_position': tray_pos_map.get(data_field[49], '제빙')
+                }
+            
+            # ========== 5. 드레인 탱크 (DATA62-70, 인덱스 61-69) ==========
+            if len(data_field) >= 70:
+                water_level_map = {0: '비어있음', 1: '저수위', 2: '중수위', 3: '만수위', 4: '에러'}
+                result['drain_tank_data'] = {
+                    'low_level': '감지' if data_field[61] == 1 else '미감지',
+                    'high_level': '감지' if data_field[62] == 1 else '미감지',
+                    'water_level_state': water_level_map.get(data_field[63], '비어있음')
+                }
+                result['drain_pump_data'] = {
+                    'operation_state': 'ON' if data_field[64] == 1 else 'OFF'
+                }
+            
+            # ========== 6. 얼음탱크 커버 (DATA71, 인덱스 70) ==========
+            if len(data_field) >= 71:
+                result['tank_cover_data'] = {
+                    'state': data_field[70]
+                }
+        
+        except Exception:
+            pass
+        
+        return result
+    
+    def parse_status_response(self, data_field, tx_id=None):
+        """
+        CMD 0x0F (상태응답) 데이터 파싱 - POLLING [메인 → PC] - 새로운 114바이트 구조 (구버전 호환용)
+        
+        Returns:
+            dict: 파싱된 데이터를 담은 딕셔너리
+        """
+        result = {
+            'sensor_data': {},
+            'hvac_data': {},
+            'cooling_data': {},
+            'icemaking_data': {},
+            'refrigeration_data': {},
+            'valve_states': {'nos': {}, 'feed': {}},
+            'drain_tank_data': {},
+            'drain_pump_data': {},
+            'tank_cover_data': {}
+        }
+        
+        if not data_field or len(data_field) == 0:
+            return result
+        
+        # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
+        if tx_id != 0x02:
+            return result
+        
+        # 최소 114바이트 필요
+        if len(data_field) < 114:
+            return result
+        
+        try:
+            # ========== 1. 센서류 (DATA1-7, 인덱스 0-6) ==========
+            if len(data_field) >= 7:
+                result['sensor_data'] = {
+                    'outdoor_temp1': float(self.protocol.signed_byte_to_int(data_field[0])),
+                    'hot_inlet_temp': float(self.protocol.signed_byte_to_int(data_field[1])),
+                    'purified_temp': float(self.protocol.signed_byte_to_int(data_field[2])),
+                    'outdoor_temp2': float(self.protocol.signed_byte_to_int(data_field[3])),
+                    'cold_temp': float(self.protocol.signed_byte_to_int(data_field[4])),
+                    'hot_internal_temp': float(self.protocol.signed_byte_to_int(data_field[5])),
+                    'hot_outlet_temp': float(self.protocol.signed_byte_to_int(data_field[6]))
+                }
+            
+            # ========== 2. 공조시스템 (DATA14-22, 인덱스 13-21) ==========
+            if len(data_field) >= 22:
+                valve1_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
+                valve2_map = {0: '냉각', 1: '제빙', 2: '핫가스', 3: '보냉'}
+                
+                result['hvac_data'] = {
+                    'refrigerant_valve_state_1': valve1_map.get(data_field[13], '핫가스'),
+                    'refrigerant_valve_state_2': valve2_map.get(data_field[14], '핫가스'),
+                    'compressor_state': '동작중' if data_field[15] == 1 else '미동작',
+                    'stabilization_time': (data_field[16] << 8) | data_field[17],
+                    'current_rps': data_field[18],
+                    'error_code': data_field[19],
+                    'dc_fan1': 'ON' if data_field[20] == 1 else 'OFF',
+                    'dc_fan2': 'ON' if data_field[21] == 1 else 'OFF'
+                }
+            
+            # ========== 3. 냉각 데이터 (DATA29-34, 인덱스 28-33) ==========
+            if len(data_field) >= 34:
+                result['cooling_data'] = {
+                    'operation_state': '가동' if data_field[28] == 1 else '대기',
+                    'initial_startup': (data_field[29] == 1),
+                    'target_rps': data_field[30],
+                    'on_temp': data_field[31] / 10.0,
+                    'off_temp': data_field[32] / 10.0,
+                    'cooling_additional_time': (data_field[33] << 8) | data_field[34]
+                }
+            
+            # ========== 4. 제빙 데이터 (DATA40-49, 인덱스 39-48) ==========
+            if len(data_field) >= 49:
+                ice_step = data_field[39]
+                
+                result['icemaking_data'] = {
+                    'ice_step': ice_step,
+                    'target_rps': data_field[40],
+                    'icemaking_time': (data_field[41] << 8) | data_field[42],
+                    'water_capacity': (data_field[43] << 8) | data_field[44],
+                    'swing_on_time': int(data_field[45] * 100),
+                    'swing_off_time': int(data_field[46] * 100),
+                    'tray_position': data_field[47],
+                    'ice_jam_state': data_field[48]
+                }
+            
+            # ========== 5. 보냉 데이터 (DATA60-64, 인덱스 59-63) ==========
+            if len(data_field) >= 64:
+                tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
+                result['refrigeration_data'] = {
+                    'target_rps': data_field[60],
+                    'target_temp': float(self.protocol.signed_byte_to_int(data_field[61])) / 10.0,
+                    'target_first_temp': float(self.protocol.signed_byte_to_int(data_field[62])) / 10.0,
+                    'cur_tray_position': tray_pos_map.get(data_field[63], '제빙')
+                }
+            
+            # ========== 6. 밸브 상태 (DATA75-94, 인덱스 74-93) ==========
+            if len(data_field) >= 79:
+                for i in range(1, 6):
+                    valve_state = data_field[73 + i]
+                    result['valve_states']['nos'][i] = (valve_state == 1)
+            
+            if len(data_field) >= 94:
+                for i in range(1, 16):
+                    valve_state = data_field[78 + i]
+                    result['valve_states']['feed'][i] = (valve_state == 1)
+            
+            # ========== 7. 드레인 탱크 (DATA100-103, 인덱스 99-102) ==========
+            if len(data_field) >= 103:
+                water_level_map = {0: '비어있음', 1: '저수위', 2: '중수위', 3: '만수위', 4: '에러'}
+                result['drain_tank_data'] = {
+                    'low_level': '감지' if data_field[99] == 1 else '미감지',
+                    'high_level': '감지' if data_field[100] == 1 else '미감지',
+                    'water_level_state': water_level_map.get(data_field[101], '비어있음')
+                }
+                result['drain_pump_data'] = {
+                    'operation_state': 'ON' if data_field[102] == 1 else 'OFF'
+                }
+            
+            # ========== 8. 기타 (DATA109, 인덱스 108) ==========
+            if len(data_field) >= 109:
+                result['tank_cover_data'] = {
+                    'state': data_field[108]
+                }
+        
+        except Exception:
+            pass
+        
+        return result
 
 
 class SerialCommunication:
@@ -927,39 +1101,43 @@ class SerialCommunication:
             return False, error_msg
     
     def start_heartbeat(self):
-        """Heartbeat 전송 시작 (CMD 0x0F)"""
+        """상태조회 전송 시작 (CMD 0xF0, 0xF1 순차 전송)"""
         self.heartbeat_active = True
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
         self.heartbeat_thread.start()
-        self.status_queue.put(('SYSTEM', "Heartbeat 시작 (CMD 0x0F, 200ms 간격)"))
+        self.status_queue.put(('SYSTEM', "상태조회 시작 (CMD 0xF0/0xF1, 200ms 간격)"))
     
     def stop_heartbeat(self):
-        """Heartbeat 전송 중지"""
+        """상태조회 전송 중지"""
         self.heartbeat_active = False
         if self.heartbeat_thread and self.heartbeat_thread.is_alive():
             self.heartbeat_thread.join(timeout=1.0)
-        self.status_queue.put(('SYSTEM', "Heartbeat 중지"))
+        self.status_queue.put(('SYSTEM', "상태조회 중지"))
     
     def pause_heartbeat(self):
-        """Heartbeat 일시 중지 (CMD 0xB3 전송 중 사용)"""
+        """상태조회 일시 중지 (CMD 0xB3 전송 중 사용)"""
         self.heartbeat_paused = True
     
     def resume_heartbeat(self):
-        """Heartbeat 재개"""
+        """상태조회 재개"""
         self.heartbeat_paused = False
     
     def _heartbeat_worker(self):
-        """Heartbeat 전송 작업자"""
+        """상태조회 전송 작업자 (CMD 0xF0과 0xF1을 순차 전송)"""
+        current_cmd = 0xF0  # 0xF0부터 시작
         while self.heartbeat_active and self.is_connected:
             try:
-                # Heartbeat가 일시 중지되었으면 대기
+                # 상태조회가 일시 중지되었으면 대기
                 if not self.heartbeat_paused:
-                    packet = self.protocol.create_heartbeat_packet()
+                    # CMD 0xF0과 0xF1을 순차 전송
+                    packet = self.protocol.create_heartbeat_packet(cmd=current_cmd)
                     self.send_queue.put(packet)
+                    # 다음 CMD로 전환 (0xF0 <-> 0xF1)
+                    current_cmd = 0xF1 if current_cmd == 0xF0 else 0xF0
                 time.sleep(self.heartbeat_interval)
             except Exception as e:
                 if self.heartbeat_active:
-                    self.status_queue.put(('ERROR', f"Heartbeat 오류: {str(e)}"))
+                    self.status_queue.put(('ERROR', f"상태조회 전송 오류: {str(e)}"))
                 break
     
     def send_packet(self, cmd, data_field=None, tx_id=None):

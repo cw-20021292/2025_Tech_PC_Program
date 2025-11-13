@@ -28,10 +28,10 @@ class ValveSystem:
         self.nos_valve_labels = {}
         self.feed_valve_labels = {}
     
-    def create_widgets(self, parent, tab_type='freezing'):
+    def create_widgets(self, parent, tab_type='freezing', row=0, column=0):
         """밸브 섹션 GUI 위젯 생성"""
         valve_frame = ttk.LabelFrame(parent, text="밸브 상태", padding="2")
-        valve_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
+        valve_frame.grid(row=row, column=column, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
         
         # NOS 밸브 (1~5)
         nos_frame = ttk.LabelFrame(valve_frame, text="NOS 밸브", padding="2")

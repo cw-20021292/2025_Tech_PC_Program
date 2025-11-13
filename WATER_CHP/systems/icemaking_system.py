@@ -10,26 +10,31 @@ import constants
 class IcemakingSystem:
     """제빙 시스템 클래스"""
     
-    def __init__(self, root, comm, log_callback):
+    def __init__(self, root, comm, log_callback, apply_table_callback=None):
         """
         Args:
             root: Tkinter 루트 윈도우
             comm: SerialCommunication 객체
             log_callback: 로그 출력 콜백 함수
+            apply_table_callback: 제빙테이블 적용 콜백 함수 (gui_main의 apply_icemaking_table)
         """
         self.root = root
         self.comm = comm
         self.log_communication = log_callback
+        self.apply_table_callback = apply_table_callback
         
         # 데이터 저장소
         self.data = {
             'operation': '대기',
+            'ice_step': 0,                # 제빙 STEP (ice_step 값에 따라 operation 상태 결정)
             'target_rps': 0,               # 목표 RPS
             'target_temp': 0,              # 목표 온도
             'icemaking_time': 0,
             'water_capacity': 0,
             'swing_on_time': 0,
-            'swing_off_time': 0
+            'swing_off_time': 0,
+            'tray_position': 0,           # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
+            'ice_jam_state': 0            # 얼음걸림 상태 (0:없음, 1:걸림)
         }
         
         # 입력 모드 상태
@@ -119,12 +124,37 @@ class IcemakingSystem:
         self.labels['swing_off_time'].pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(swing_off_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
         
+        # 트레이 위치
+        tray_position_frame = ttk.Frame(icemaking_frame)
+        tray_position_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=1)
+        ttk.Label(tray_position_frame, text="트레이위치:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
+        self.labels['tray_position'] = tk.Label(tray_position_frame, text="제빙", 
+                                                fg="white", bg="gray", font=("Arial", 8, "bold"),
+                                                width=10, relief="raised")
+        self.labels['tray_position'].pack(side=tk.LEFT, padx=(2, 0))
+        
+        # 얼음걸림 상태
+        ice_jam_frame = ttk.Frame(icemaking_frame)
+        ice_jam_frame.grid(row=8, column=0, sticky=(tk.W, tk.E), pady=1)
+        ttk.Label(ice_jam_frame, text="얼음걸림:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
+        self.labels['ice_jam_state'] = tk.Label(ice_jam_frame, text="없음", 
+                                                fg="white", bg="green", font=("Arial", 8, "bold"),
+                                                width=10, relief="raised")
+        self.labels['ice_jam_state'].pack(side=tk.LEFT, padx=(2, 0))
+        
         # CMD 0xB2 전송 버튼
         send_btn_frame = ttk.Frame(icemaking_frame)
-        send_btn_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        send_btn_frame.grid(row=9, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
         self.send_btn = ttk.Button(send_btn_frame, text="제빙 설정 입력 모드",
                                    command=self.send_control, state="disabled")
         self.send_btn.pack(fill=tk.X)
+        
+        # 제빙테이블 적용 버튼
+        table_btn_frame = ttk.Frame(icemaking_frame)
+        table_btn_frame.grid(row=10, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        self.table_btn = ttk.Button(table_btn_frame, text="제빙테이블 적용",
+                                   command=self._apply_freezing_table, state="disabled")
+        self.table_btn.pack(fill=tk.X)
         
         icemaking_frame.columnconfigure(0, weight=1)
         
@@ -316,10 +346,14 @@ class IcemakingSystem:
         """GUI 업데이트"""
         # 제빙 동작 (입력 모드가 아닐 때만)
         if 'operation' in self.labels and not self.edit_mode:
-            if self.data['operation'] == '동작':
-                self.labels['operation'].config(text="동작", bg="green")
+            operation_text = self.data.get('operation', '대기')
+            # ice_step이 0이 아니면 동작 중으로 간주
+            ice_step = self.data.get('ice_step', 0)
+            if ice_step == 0 or operation_text == '대기':
+                self.labels['operation'].config(text=operation_text, bg="blue")
             else:
-                self.labels['operation'].config(text="대기", bg="blue")
+                # 동작 중인 상태 (제빙중, 예열, 탈빙중 등)
+                self.labels['operation'].config(text=operation_text, bg="green")
         
         # 입력 모드가 아닐 때만 Entry 위젯 업데이트
         if not self.edit_mode:
@@ -333,11 +367,40 @@ class IcemakingSystem:
                         widget.delete(0, tk.END)
                         widget.insert(0, new_value)
                         widget.config(state='readonly')
+        
+        # 트레이 위치 업데이트
+        if 'tray_position' in self.labels:
+            tray_pos = self.data.get('tray_position', 0)
+            tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
+            tray_pos_text = tray_pos_map.get(tray_pos, f'알 수 없음({tray_pos})')
+            tray_pos_colors = {0: 'blue', 1: 'orange', 2: 'yellow', 3: 'red'}
+            tray_pos_color = tray_pos_colors.get(tray_pos, 'gray')
+            
+            if self.labels['tray_position'].cget('text') != tray_pos_text:
+                self.labels['tray_position'].config(text=tray_pos_text, bg=tray_pos_color)
+        
+        # 얼음걸림 상태 업데이트
+        if 'ice_jam_state' in self.labels:
+            ice_jam = self.data.get('ice_jam_state', 0)
+            ice_jam_text = '걸림' if ice_jam == 1 else '없음'
+            ice_jam_color = 'red' if ice_jam == 1 else 'green'
+            
+            if self.labels['ice_jam_state'].cget('text') != ice_jam_text:
+                self.labels['ice_jam_state'].config(text=ice_jam_text, bg=ice_jam_color)
+    
+    def _apply_freezing_table(self):
+        """제빙테이블 적용 버튼 클릭 시 호출"""
+        if self.apply_table_callback:
+            self.apply_table_callback()
+        else:
+            self.log_communication("제빙테이블 적용 기능이 연결되지 않았습니다.", "red")
     
     def set_connection_state(self, connected):
         """연결 상태에 따라 버튼 활성화/비활성화"""
         if self.send_btn:
             self.send_btn.config(state="normal" if connected else "disabled")
+        if self.table_btn:
+            self.table_btn.config(state="normal" if connected else "disabled")
     
     def get_data(self):
         """현재 데이터 반환"""

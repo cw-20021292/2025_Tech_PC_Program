@@ -25,6 +25,7 @@ class HVACSystem:
             'refrigerant_valve_state_1': '핫가스',
             'refrigerant_valve_state_2': '핫가스',
             'compressor_state': '미동작',
+            'current_rps': 0,
             'error_code': 0,
             'stabilization_time': 0,  # 안정화 시간
             'dc_fan1': 'OFF',
