@@ -23,38 +23,23 @@ typedef enum
     UART_MODE_ERROR = 2,
 } RX_MODE;
 
-// typedef enum
-// {
-//     TX_CMD_F0 = 0x01,
-//     TX_CMD_F1 = 0x02,
-//     TX_CMD_A0 = 0x04,
-//     TX_CMD_A1 = 0x08,
-//     TX_CMD_B0 = 0x10,
-//     TX_CMD_B1 = 0x20,
-//     TX_CMD_B2 = 0x40,
-//     TX_CMD_B3 = 0x80,
-//     TX_CMD_B4 = 0x100,
-//     TX_CMD_C0 = 0x200,
-// } TX_MODE;
 
-#define TX_CMD_F0 0x01
-#define TX_CMD_F1 0x02
-#define TX_CMD_A0 0x04
-#define TX_CMD_A1 0x08
-#define TX_CMD_B0 0x10
+/* 상태조회 커맨드 */
+#define TX_CMD_F0 0x01  // 공통 시스템 상태조회
+#define TX_CMD_F1 0x02  // 냉각 시스템 상태조회
+/* 냉동 관련 변경 커맨드 */
 #define TX_CMD_B1 0x20
 #define TX_CMD_B2 0x40
 #define TX_CMD_B3 0x80
 #define TX_CMD_B4 0x100
-#define TX_CMD_C0 0x200
 
 /* 패킷 구조 */
-#define WORK_STX        0x02
-#define WORK_ETX        0x03
-#define WORK_ID_PC      0x01
-#define WORK_ID_MAIN    0x02
-#define WORK_ID_FRONT   0x03
-#define WORK_PACKET_BASIC_LENGTH            7
+#define WORK_STX                        0x02  // 패킷 시작
+#define WORK_ETX                        0x03  // 패킷 종료
+#define WORK_ID_PC                      0x01  // PC 통신
+#define WORK_ID_MAIN                    0x02  // 메인 통신
+#define WORK_ID_FRONT                   0x03  // 프론트 통신
+#define WORK_PACKET_BASIC_LENGTH        7     // 패킷 기본 길이
 
 /* 공통 시스템 프로토콜 (응답) */
 typedef enum
