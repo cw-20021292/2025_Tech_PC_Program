@@ -816,12 +816,11 @@ class StatusResponseHandler:
             
             # ========== 4. 보냉 데이터 (DATA47-61, 인덱스 46-60) ==========
             if len(data_field) >= 61:
-                tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
                 result['refrigeration_data'] = {
-                    'target_rps': data_field[46],
-                    'target_temp': float(self.protocol.signed_byte_to_int(data_field[47])) / 10.0,
-                    'target_first_temp': float(self.protocol.signed_byte_to_int(data_field[48])) / 10.0,
-                    'cur_tray_position': tray_pos_map.get(data_field[49], '제빙')
+                    'target_rps': data_field[47],
+                    'target_temp': float(self.protocol.signed_byte_to_int(data_field[48])) / 10.0,
+                    'target_first_temp': float(self.protocol.signed_byte_to_int(data_field[49])) / 10.0,
+                    'cur_tray_position': data_field[50]  # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
                 }
             
             # ========== 5. 드레인 탱크 (DATA62-70, 인덱스 61-69) ==========

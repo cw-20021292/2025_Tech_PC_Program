@@ -58,6 +58,12 @@ class MainGUI:
             'hot_outlet_temp': 0
         }
         
+        # 기타 상태 데이터 (필터리드, 전면커버)
+        self.other_status = {
+            'filter_detected': False,  # 필터리드 (1: 감지 / 0: 미감지)
+            'front_cover_detected': False  # 전면커버 (1: 감지 / 0: 미감지)
+        }
+        
         # Excel Sheet 선택 모듈 초기화
         self.excel_sheet_selector = ExcelSheetSelector(self.root)
         
@@ -188,11 +194,12 @@ class MainGUI:
         self.icemaking_system.create_widgets(middle_frame)
         self.refrigeration_system.create_widgets(middle_frame)
         
-        # 하단 영역 레이아웃 (밸브/센서)
+        # 하단 영역 레이아웃 (밸브/센서/기타)
         # 시스템 클래스의 create_widgets 메서드 사용
         self.valve_system.create_widgets(bottom_frame, tab_type='freezing', row=0, column=0)
         self.drain_tank_system.create_widgets(bottom_frame, row=0, column=1)
         self.create_sensor_area(bottom_frame)  # 센서는 별도 처리 필요 (column=2)
+        self.create_other_status_area(bottom_frame)  # 기타 상태 (column=3)
         
         # 시스템 클래스의 레이블을 gui_main의 레이블 딕셔너리에 매핑
         self.cooling_labels = self.cooling_system.labels
@@ -212,10 +219,11 @@ class MainGUI:
             middle_frame.columnconfigure(i, weight=1)
         middle_frame.rowconfigure(0, weight=1)
         
-        # 하단 프레임 (밸브/센서 3개)
+        # 하단 프레임 (밸브/센서/기타 4개)
         bottom_frame.columnconfigure(0, weight=1)
         bottom_frame.columnconfigure(1, weight=1)
         bottom_frame.columnconfigure(2, weight=1)
+        bottom_frame.columnconfigure(3, weight=1)
         bottom_frame.rowconfigure(0, weight=1)
         
         main_frame.columnconfigure(0, weight=1)
@@ -1844,6 +1852,35 @@ class MainGUI:
         
         drain_tank_frame.columnconfigure(0, weight=1)
     
+    def create_other_status_area(self, parent):
+        """기타 상태 섹션 생성 (필터리드, 전면커버)"""
+        other_frame = ttk.LabelFrame(parent, text="기타", padding="2")
+        other_frame.grid(row=0, column=3, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(2, 0))
+        
+        # 필터리드 상태
+        filter_frame = ttk.Frame(other_frame)
+        filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        filter_frame.columnconfigure(0, weight=1)
+        ttk.Label(filter_frame, text="필터리드:", font=("Arial", 9), width=10).pack(side=tk.LEFT)
+        if not hasattr(self, 'other_status_labels'):
+            self.other_status_labels = {}
+        self.other_status_labels['filter_detected'] = tk.Label(filter_frame, text="미감지", 
+                                                              fg="white", bg="darkgray", font=("Arial", 8, "bold"),
+                                                              width=8, relief="raised")
+        self.other_status_labels['filter_detected'].pack(side=tk.RIGHT)
+        
+        # 전면커버 상태
+        cover_frame = ttk.Frame(other_frame)
+        cover_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        cover_frame.columnconfigure(0, weight=1)
+        ttk.Label(cover_frame, text="전면커버:", font=("Arial", 9), width=10).pack(side=tk.LEFT)
+        self.other_status_labels['front_cover_detected'] = tk.Label(cover_frame, text="미감지", 
+                                                                    fg="white", bg="darkgray", font=("Arial", 8, "bold"),
+                                                                    width=8, relief="raised")
+        self.other_status_labels['front_cover_detected'].pack(side=tk.RIGHT)
+        
+        other_frame.columnconfigure(0, weight=1)
+    
     def create_control_sections(self, parent):
         """제어검토용 탭의 제어 관련 섹션들 생성"""
         # 제어 상태 섹션
@@ -1869,10 +1906,12 @@ class MainGUI:
         system_frame = ttk.Frame(control_cmd_frame)
         system_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         self.control_buttons['start'] = tk.Button(system_frame, text="시스템 시작", 
-                                                 font=("Arial", 7), bg="lightgreen", width=10)
+                                                 font=("Arial", 7), bg="lightgreen", width=10,
+                                                 state="disabled")
         self.control_buttons['start'].pack(side=tk.LEFT, padx=(0, 2))
         self.control_buttons['stop'] = tk.Button(system_frame, text="시스템 정지", 
-                                                font=("Arial", 7), bg="lightcoral", width=10)
+                                                font=("Arial", 7), bg="lightcoral", width=10,
+                                                state="disabled")
         self.control_buttons['stop'].pack(side=tk.LEFT)
         
         # 설정값 섹션
@@ -1985,19 +2024,6 @@ class MainGUI:
                                        state="disabled")
         self.log_clear_btn.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
-        # CMD 전송 버튼들 (0xA0 제외)
-        cmd_frame = ttk.LabelFrame(right_frame, text="CMD 전송", padding="2")
-        cmd_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
-        
-        self.cmd_buttons = {}
-        cmds = [0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]  # 0xA0 제거
-        for cmd in cmds:
-            btn = ttk.Button(cmd_frame, text=f"CMD 0x{cmd:02X}",
-                           command=lambda c=cmd: self.send_cmd(c),
-                           state="disabled")
-            btn.pack(fill=tk.X, pady=1)
-            self.cmd_buttons[cmd] = btn
-        
         right_frame.columnconfigure(0, weight=1)
         
         # 포트 목록 초기화
@@ -2040,15 +2066,18 @@ class MainGUI:
                 self.baudrate_combo.config(state="disabled")
                 self.refresh_ports_btn.config(state="disabled")
                 
-                # CMD 버튼 활성화
-                for btn in self.cmd_buttons.values():
-                    btn.config(state="normal")
                 
                 # 각 시스템의 버튼 활성화 (set_connection_state 사용)
                 self.cooling_system.set_connection_state(True)
                 self.hvac_system.set_connection_state(True)
                 self.icemaking_system.set_connection_state(True)
                 self.refrigeration_system.set_connection_state(True)
+                
+                # 시스템 시작/정지 버튼 활성화
+                if hasattr(self, 'control_buttons') and self.control_buttons:
+                    for btn in self.control_buttons.values():
+                        if btn:
+                            btn.config(state="normal")
                 
                 # Log 추출/삭제 버튼 활성화
                 if hasattr(self, 'log_export_btn'):
@@ -2069,15 +2098,18 @@ class MainGUI:
                 self.baudrate_combo.config(state="readonly")
                 self.refresh_ports_btn.config(state="normal")
                 
-                # CMD 버튼 비활성화
-                for btn in self.cmd_buttons.values():
-                    btn.config(state="disabled")
                 
                 # 각 시스템의 버튼 비활성화 (set_connection_state 사용)
                 self.cooling_system.set_connection_state(False)
                 self.hvac_system.set_connection_state(False)
                 self.icemaking_system.set_connection_state(False)
                 self.refrigeration_system.set_connection_state(False)
+                
+                # 시스템 시작/정지 버튼 비활성화
+                if hasattr(self, 'control_buttons') and self.control_buttons:
+                    for btn in self.control_buttons.values():
+                        if btn:
+                            btn.config(state="disabled")
                 
                 # Log 추출/삭제 버튼 비활성화
                 if hasattr(self, 'log_export_btn'):
@@ -2333,6 +2365,12 @@ class MainGUI:
                 if valve_states.get('feed'):
                     self.valve_system.update_data(nos_states=None, feed_states=valve_states['feed'])
             
+            # 필터리드 및 전면커버 상태 업데이트
+            if 'filter_detected' in parsed_data:
+                self.other_status['filter_detected'] = parsed_data['filter_detected']
+            if 'front_cover_detected' in parsed_data:
+                self.other_status['front_cover_detected'] = parsed_data['front_cover_detected']
+            
         except Exception as e:
             self.log_communication(f"공통 상태조회 처리 오류: {str(e)}", "red")
     
@@ -2460,6 +2498,17 @@ class MainGUI:
             if parsed_data.get('drain_pump_data'):
                 self.drain_pump_system.update_data(parsed_data['drain_pump_data'])
             
+            # 탱크커버 데이터를 제빙 시스템에 전달
+            if parsed_data.get('tank_cover_data'):
+                tank_cover_state = parsed_data['tank_cover_data'].get('state', 0)
+                # icemaking_data가 이미 업데이트되었거나 새로 생성된 경우
+                if parsed_data.get('icemaking_data'):
+                    icemaking_data['tank_cover_state'] = tank_cover_state
+                    self.icemaking_system.update_data(icemaking_data)
+                else:
+                    # icemaking_data가 없는 경우에도 탱크커버만 업데이트
+                    self.icemaking_system.update_data({'tank_cover_state': tank_cover_state})
+            
         except Exception as e:
             self.log_communication(f"냉동 상태조회 처리 오류: {str(e)}", "red")
     
@@ -2471,14 +2520,14 @@ class MainGUI:
             
             # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
             if tx_id != 0x02:  # MAIN → PC
-                device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
-                tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
-                self.log_communication(
-                    f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
-                    "orange"
-                )
-                return
-            
+                    device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
+                    tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
+                    self.log_communication(
+                        f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
+                        "orange"
+                    )
+                    return
+                
             # 최소 114바이트 필요
             if len(data_field) < 114:
                 if self.debug_comm:
@@ -2589,7 +2638,7 @@ class MainGUI:
                             f"  제빙 STEP이 22이지만 제빙테이블이 로드되지 않았습니다.",
                             "orange"
                         )
-                
+            
                 self.icemaking_system.update_data(icemaking_data)
             
             if parsed_data.get('refrigeration_data'):
@@ -2960,40 +3009,40 @@ class MainGUI:
         # NOS 밸브 상태 업데이트 (양쪽 탭 모두)
         if hasattr(self.valve_system, 'nos_valve_states'):
             for valve_num, is_closed in self.valve_system.nos_valve_states.items():
-                # 냉동검토용 탭
+            # 냉동검토용 탭
                 if hasattr(self.valve_system, 'nos_valve_labels') and valve_num in self.valve_system.nos_valve_labels:
                     label = self.valve_system.nos_valve_labels[valve_num]
-                    if is_closed:
-                        label.config(text="CLOSE", bg="red")
-                    else:
-                        label.config(text="OPEN", bg="blue")
-                
-                # 제어검토용 탭
+                if is_closed:
+                    label.config(text="CLOSE", bg="red")
+                else:
+                    label.config(text="OPEN", bg="blue")
+            
+            # 제어검토용 탭
                 if hasattr(self.valve_system, 'nos_valve_labels_control') and valve_num in self.valve_system.nos_valve_labels_control:
                     label = self.valve_system.nos_valve_labels_control[valve_num]
-                    if is_closed:
-                        label.config(text="CLOSE", bg="red")
-                    else:
-                        label.config(text="OPEN", bg="blue")
+                if is_closed:
+                    label.config(text="CLOSE", bg="red")
+                else:
+                    label.config(text="OPEN", bg="blue")
         
         # FEED 밸브 상태 업데이트 (양쪽 탭 모두)
         if hasattr(self.valve_system, 'feed_valve_states'):
             for valve_num, is_open in self.valve_system.feed_valve_states.items():
-                # 냉동검토용 탭
+            # 냉동검토용 탭
                 if hasattr(self.valve_system, 'feed_valve_labels') and valve_num in self.valve_system.feed_valve_labels:
                     label = self.valve_system.feed_valve_labels[valve_num]
-                    if is_open:
-                        label.config(text="OPEN", bg="blue")
-                    else:
-                        label.config(text="CLOSE", bg="red")
-                
-                # 제어검토용 탭
+                if is_open:
+                    label.config(text="OPEN", bg="blue")
+                else:
+                    label.config(text="CLOSE", bg="red")
+            
+            # 제어검토용 탭
                 if hasattr(self.valve_system, 'feed_valve_labels_control') and valve_num in self.valve_system.feed_valve_labels_control:
                     label = self.valve_system.feed_valve_labels_control[valve_num]
-                    if is_open:
-                        label.config(text="OPEN", bg="blue")
-                    else:
-                        label.config(text="CLOSE", bg="red")
+                if is_open:
+                    label.config(text="OPEN", bg="blue")
+                else:
+                    label.config(text="CLOSE", bg="red")
         
         # 센서 데이터 업데이트
         for sensor_key, value in self.sensor_data.items():
@@ -3021,7 +3070,23 @@ class MainGUI:
         # 드레인 펌프 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
         self.drain_pump_system._update_gui()
         
-        
+        # 기타 상태 업데이트 (필터리드, 전면커버)
+        if hasattr(self, 'other_status_labels'):
+            # 필터리드 상태
+            if 'filter_detected' in self.other_status_labels:
+                filter_detected = self.other_status.get('filter_detected', False)
+                if filter_detected:
+                    self.other_status_labels['filter_detected'].config(text="감지", bg="darkgreen")
+                else:
+                    self.other_status_labels['filter_detected'].config(text="미감지", bg="darkgray")
+            
+            # 전면커버 상태
+            if 'front_cover_detected' in self.other_status_labels:
+                front_cover_detected = self.other_status.get('front_cover_detected', False)
+                if front_cover_detected:
+                    self.other_status_labels['front_cover_detected'].config(text="감지", bg="darkgreen")
+                else:
+                    self.other_status_labels['front_cover_detected'].config(text="미감지", bg="darkgray")
 
         # 보냉시스템 데이터 업데이트
         refrigeration_data = self.refrigeration_system.get_data()
@@ -3053,7 +3118,7 @@ class MainGUI:
                     self.canvas2_freezing.draw_idle()
                 except Exception:
                     pass
-            
+
             if hasattr(self, 'pressure_ax_control'):
                 self.pressure_ax_control.clear()
                 self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8, fontfamily='DejaVu Sans')
