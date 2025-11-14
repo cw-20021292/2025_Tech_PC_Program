@@ -3025,6 +3025,7 @@
       <RelativePath>..\Source\Module\APP\App_Comm_Protocol.h</RelativePath>
       <TreeImageGuid>03cad1e8-2eb3-4cde-a8a3-982423631122</TreeImageGuid>
       <ParentItem>e7dca7da-a273-4345-87ec-d350cfb4da0b</ParentItem>
+      <Property>0ff6d8c5-82ff-4668-ac80-1b2fa65c4aa5</Property>
     </Instance>
     <Instance Guid="539cfcf3-bd8f-4a14-bd93-57cf45553230">
       <Name>hal_serial.c</Name>
@@ -3975,6 +3976,9 @@
       <MemoCount>0</MemoCount>
     </Instance>
     <Instance Guid="a24f3ad7-fb7f-4dff-9814-e6724d375f64">
+      <MemoCount>0</MemoCount>
+    </Instance>
+    <Instance Guid="0ff6d8c5-82ff-4668-ac80-1b2fa65c4aa5">
       <MemoCount>0</MemoCount>
     </Instance>
   </Class>

@@ -170,6 +170,12 @@ static void Comm_Rcv_Packet_Handler(void)
     }
 }
 
+/*********************************************************************************/
+/**
+ * @brief 패킷 처리
+ * @details 수신 패킷 처리 및 송신 패킷 처리
+ * @note @TODO : while문에 적용
+ */
 void Comm_Packet_Handler(void)
 {
     Comm_Rcv_Packet_Handler();

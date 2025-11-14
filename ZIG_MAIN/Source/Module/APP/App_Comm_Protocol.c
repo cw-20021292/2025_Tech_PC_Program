@@ -14,7 +14,7 @@
 #include    "M9_Front_Communication.h"
 
 #if 1
-// 占쌤븝옙 占쏙옙占쏙옙 占쏙옙占쏙옙
+/* @TODO : 외부 변수 참조 및 헤더 참조 */
 extern U8 get_cold_mode_comp_rps(void);
 extern U8 get_ice_mode_comp_rps(void);
 extern U8 gu8BLDCErrorNum;
@@ -49,6 +49,11 @@ B1_COLD_TABLE_DATA_FIELD B1Data = {0, };
 B2_ICE_MAKE_TABLE_DATA_FIELD B2Data = {0, };
 B4_ICE_STORAGE_TABLE_DATA_FIELD B4Data = {0, };
 
+/***************************************************************************************/
+/**
+ * @brief 커맨드 F0의 프로토콜 데이터필드
+ * @details 커맨드 F0의 프로토콜 데이터필드를 사용자의 변수를 채우는 함수
+ */
 static void Parse_F0_Protocol(F0_COMMON_SYSTEM_DATA_FIELD *p_F0_DataField)
 {
     /* 센서류 (DATAFIELD 1-13) */
@@ -88,6 +93,11 @@ static void Parse_F0_Protocol(F0_COMMON_SYSTEM_DATA_FIELD *p_F0_DataField)
     p_F0_DataField->u8FrontReed = bit_filter_cover;                                  // CMD 96: 프론트 리드
 }
 
+/***************************************************************************************/
+/**
+ * @brief 커맨드 F1의 프로토콜 데이터필드
+ * @details 커맨드 F1의 프로토콜 데이터필드를 사용자의 변수를 채우는 함수
+ */
 static void Parse_F1_Protocol(F1_COLD_SYSTEM_DATA_FIELD *p_F1_DataField)
 {
     /* 공조시스템 (DATAFIELD 1-13) */
@@ -152,6 +162,11 @@ static void Parse_F2_Protocol(F2_HEATING_SYSTEM_DATA_FIELD *pstDataField)
 
 }
 
+/***************************************************************************************/
+/**
+ * @brief 커맨드 B1 (냉각 디버깅 데이터)의 프로토콜 데이터필드
+ * @details PC → 제품 방향으로 고정값을 받아서 쓰는 함수
+ */
 static void Parse_B1_Protocol(U8 *buf, B1_COLD_TABLE_DATA_FIELD *pstDataField)
 {
     pstDataField->u8ColdTargetRPS = buf[4];
@@ -160,6 +175,11 @@ static void Parse_B1_Protocol(U8 *buf, B1_COLD_TABLE_DATA_FIELD *pstDataField)
     pstDataField->u16ColdDelayTime = (U16)((U16)buf[7] << 8 | buf[8]);
 }
 
+/***************************************************************************************/
+/**
+ * @brief 커맨드 B2 (제빙 디버깅 데이터)의 프로토콜 데이터필드
+ * @details PC → 제품 방향으로 고정값을 받아서 쓰는 함수
+ */
 static void Parse_B2_Protocol(U8 *buf, B2_ICE_MAKE_TABLE_DATA_FIELD *pstDataField)
 {
     pstDataField->u8IceMakeTargetRPS = buf[4];
@@ -168,6 +188,11 @@ static void Parse_B2_Protocol(U8 *buf, B2_ICE_MAKE_TABLE_DATA_FIELD *pstDataFiel
     pstDataField->u8SwingbarOff = buf[8];
 }
 
+/***************************************************************************************/
+/**
+ * @brief 커맨드 B4 (보냉 디버깅 데이터)의 프로토콜 데이터필드
+ * @details PC → 제품 방향으로 고정값을 받아서 쓰는 함수
+ */
 static void Parse_B4_Protocol(U8 *buf, B4_ICE_STORAGE_TABLE_DATA_FIELD *pstDataField)
 {
     pstDataField->u8IceStorageTargetRPS = buf[4];
@@ -236,6 +261,7 @@ U8 Protocol_Make_Ack_Packet(U8* buf, U8* Txbuf)
             break;
 
         case PROTOCOL_B2_CMD:                    // 0xB2
+            /* ECO */
             Parse_B2_Protocol(buf, &B2Data);
             data_length = buf[PROTOCOL_IDX_LENGTH];
             for(u8DataIndex = 0; u8DataIndex < data_length; u8DataIndex++)
@@ -245,6 +271,7 @@ U8 Protocol_Make_Ack_Packet(U8* buf, U8* Txbuf)
             break;
 
         case PROTOCOL_B4_CMD:                    // 0xB4
+            /* ECO */
             Parse_B4_Protocol(buf, &B4Data);
             data_length = buf[PROTOCOL_IDX_LENGTH];
             for(u8DataIndex = 0; u8DataIndex < data_length; u8DataIndex++)
