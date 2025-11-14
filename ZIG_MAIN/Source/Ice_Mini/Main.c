@@ -11,6 +11,7 @@
 #include    "Port_Define.h"
 #include    "Main.h"
 #include    "test_uart_comm.h"
+#include    "App_Comm.h"
 void main(void);
 void Sync_50MS(void);
 void Sync_100MS(void);
@@ -29,7 +30,9 @@ extern void Main_PBA_Test_Mode_Start();
 void main(void)
 {
     System_ini();
-    
+
+    Uart_Init();
+
     while(1)
     {
         WDTE = (U8)0xAC;
@@ -52,6 +55,7 @@ void main(void)
         self_test();
 
         AT_UART_Communication();
+        Comm_Packet_Handler();
 
         Save_Eeprom_Data();
         wifi();

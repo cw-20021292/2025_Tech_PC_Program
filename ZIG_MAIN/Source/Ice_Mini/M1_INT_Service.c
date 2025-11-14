@@ -39,8 +39,10 @@
 #pragma interrupt INTSRE2 INTSRE2
 
 /* 공장 자동화검사 Uart 통신 */
+#if 1
 #pragma interrupt INTST3 INTST3
 #pragma interrupt INTSR3 INTSR3
+#endif
 #pragma interrupt INTSRE3 INTSRE3
 
 /* RTC, EEPROM Module I2C 통신 */
@@ -361,6 +363,7 @@ __interrupt void INTSRE2(void)
 
 }
 
+#if 1
 /***********************************************************************************************************************
  * Function Name: System_ini
  * Description  :
@@ -378,6 +381,7 @@ __interrupt void INTSR3(void)
 {
     int_UART3_WORK_RX();
 }
+#endif /* NEVER */
 
 /***********************************************************************************************************************
  * Function Name: System_ini
