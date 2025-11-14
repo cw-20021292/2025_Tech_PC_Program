@@ -48,7 +48,8 @@ class MainGUI:
         self.refrigeration_system = RefrigerationSystem(self.root, self.comm, self.log_communication)
         self.drain_tank_system = DrainTankSystem(self.root, self.comm, self.log_communication)
         self.drain_pump_system = DrainPumpSystem(self.root, self.comm, self.log_communication)
-        self.valve_system = ValveSystem(self.root, self.comm, self.log_communication)
+        self.valve_system = ValveSystem(self.root, self.comm, self.log_communication,
+                                        toggle_graph1_callback=self.toggle_graph1_item)
         
         # 센서 데이터 (시스템 클래스에 없는 경우를 위한 임시 저장소)
         self.sensor_data = {
@@ -56,6 +57,12 @@ class MainGUI:
             'purified_temp': 0, 'cold_temp': 0,
             'hot_inlet_temp': 0, 'hot_internal_temp': 0,
             'hot_outlet_temp': 0
+        }
+        
+        # 기타 상태 데이터 (필터리드, 전면커버)
+        self.other_status = {
+            'filter_detected': False,  # 필터리드 (1: 감지 / 0: 미감지)
+            'front_cover_detected': False  # 전면커버 (1: 감지 / 0: 미감지)
         }
         
         # Excel Sheet 선택 모듈 초기화
@@ -188,11 +195,12 @@ class MainGUI:
         self.icemaking_system.create_widgets(middle_frame)
         self.refrigeration_system.create_widgets(middle_frame)
         
-        # 하단 영역 레이아웃 (밸브/센서)
+        # 하단 영역 레이아웃 (밸브/센서/기타)
         # 시스템 클래스의 create_widgets 메서드 사용
         self.valve_system.create_widgets(bottom_frame, tab_type='freezing', row=0, column=0)
         self.drain_tank_system.create_widgets(bottom_frame, row=0, column=1)
         self.create_sensor_area(bottom_frame)  # 센서는 별도 처리 필요 (column=2)
+        self.create_other_status_area(bottom_frame)  # 기타 상태 (column=3)
         
         # 시스템 클래스의 레이블을 gui_main의 레이블 딕셔너리에 매핑
         self.cooling_labels = self.cooling_system.labels
@@ -212,10 +220,11 @@ class MainGUI:
             middle_frame.columnconfigure(i, weight=1)
         middle_frame.rowconfigure(0, weight=1)
         
-        # 하단 프레임 (밸브/센서 3개)
+        # 하단 프레임 (밸브/센서/기타 4개)
         bottom_frame.columnconfigure(0, weight=1)
         bottom_frame.columnconfigure(1, weight=1)
         bottom_frame.columnconfigure(2, weight=1)
+        bottom_frame.columnconfigure(3, weight=1)
         bottom_frame.rowconfigure(0, weight=1)
         
         main_frame.columnconfigure(0, weight=1)
@@ -731,7 +740,7 @@ class MainGUI:
                     "gray"
                 )
                 self.log_communication(
-                    f"제빙테이블이 메모리에 저장되었습니다. CMD 0x0F 응답을 대기 중...",
+                    f"제빙테이블이 메모리에 저장되었습니다. CMD 0xF1 응답을 대기 중...",
                     "purple"
                 )
                 
@@ -1034,237 +1043,6 @@ class MainGUI:
             self.log_communication(f"제빙테이블 전송 오류: {str(e)}", "red")
             return False
 
-    def toggle_compressor_state(self, event):
-        """압축기 상태 토글 (동작중<->미동작)"""
-        print(f"DEBUG: toggle_compressor_state 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
-        
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['compressor_state']
-        else:
-            current_value = self.hvac_data['compressor_state']
-        
-        next_value = '미동작' if current_value == '동작중' else '동작중'
-        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
-        
-        # UI 업데이트
-        if next_value == '동작중':
-            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
-        else:
-            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['compressor_state'] = next_value
-            self.log_communication(f"압축기 상태 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['compressor_state'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_dc_fan1(self, event):
-        """압축기 팬 토글 (ON<->OFF)"""
-        print(f"DEBUG: toggle_dc_fan1 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
-        
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['dc_fan1']
-        else:
-            current_value = self.hvac_data['dc_fan1']
-        
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['dc_fan1'] = next_value
-            self.log_communication(f"압축기 팬 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['dc_fan1'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_dc_fan2(self, event):
-        """얼음탱크 팬 토글 (ON<->OFF)"""
-        print(f"DEBUG: toggle_dc_fan2 호출됨, hvac_edit_mode={self.hvac_edit_mode}")  # 디버그
-        
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['dc_fan2']
-        else:
-            current_value = self.hvac_data['dc_fan2']
-        
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        print(f"DEBUG: {current_value} → {next_value}")  # 디버그
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['dc_fan2'] = next_value
-            self.log_communication(f"얼음탱크 팬 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['dc_fan2'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_compressor_state(self, event):
-        """압축기 상태 토글 (동작중<->미동작)"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['compressor_state']
-        else:
-            current_value = self.hvac_data['compressor_state']
-        
-        next_value = '미동작' if current_value == '동작중' else '동작중'
-        
-        # UI 업데이트
-        if next_value == '동작중':
-            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
-        else:
-            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['compressor_state'] = next_value
-            self.log_communication(f"압축기 상태 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['compressor_state'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_dc_fan1(self, event):
-        """압축기 팬 토글 (ON<->OFF)"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['dc_fan1']
-        else:
-            current_value = self.hvac_data['dc_fan1']
-        
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['dc_fan1'] = next_value
-            self.log_communication(f"압축기 팬 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['dc_fan1'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_dc_fan2(self, event):
-        """얼음탱크 팬 토글 (ON<->OFF)"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        # 입력 모드 여부에 따라 다른 데이터 사용
-        if self.hvac_edit_mode:
-            current_value = self.hvac_temp_data['dc_fan2']
-        else:
-            current_value = self.hvac_data['dc_fan2']
-        
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
-        
-        if self.hvac_edit_mode:
-            # 입력 모드: 임시 저장소에만 저장 (전송은 입력 모드 해제 시)
-            self.hvac_temp_data['dc_fan2'] = next_value
-            self.log_communication(f"얼음탱크 팬 변경: {next_value} (입력 모드)", "purple")
-        else:
-            # 일반 모드: 즉시 데이터 업데이트 및 전송
-            self.hvac_data['dc_fan2'] = next_value
-            self.send_hvac_immediate()
-
-    def toggle_compressor_state(self, event):
-        """압축기 상태 토글 (동작중<->미동작)"""
-        if not self.hvac_edit_mode:
-            return
-        
-        current_value = self.hvac_temp_data['compressor_state']
-        next_value = '미동작' if current_value == '동작중' else '동작중'
-        self.hvac_temp_data['compressor_state'] = next_value
-        
-        # UI 업데이트
-        if next_value == '동작중':
-            self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
-        else:
-            self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
-
-    def toggle_dc_fan1(self, event):
-        """압축기 팬 토글 (ON<->OFF)"""
-        if not self.hvac_edit_mode:
-            return
-        
-        current_value = self.hvac_temp_data['dc_fan1']
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        self.hvac_temp_data['dc_fan1'] = next_value
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
-
-    def toggle_dc_fan2(self, event):
-        """얼음탱크 팬 토글 (ON<->OFF)"""
-        if not self.hvac_edit_mode:
-            return
-        
-        current_value = self.hvac_temp_data['dc_fan2']
-        next_value = 'OFF' if current_value == 'ON' else 'ON'
-        self.hvac_temp_data['dc_fan2'] = next_value
-        
-        # UI 업데이트
-        if next_value == 'ON':
-            self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
-        else:
-            self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
-
-    # ============================================
-    # 3. 제빙 동작 토글 함수 추가
-    # ============================================
     def toggle_icemaking_operation(self, event):
         """제빙 동작 토글 (대기<->동작)"""
         if not self.icemaking_edit_mode:
@@ -1279,212 +1057,6 @@ class MainGUI:
             self.icemaking_labels['operation'].config(text="동작", bg="green")
         else:
             self.icemaking_labels['operation'].config(text="대기", bg="blue")
-
-    def send_hvac_control(self):
-        """공조 제어 CMD 0xB0 전송 - 입력 모드 토글 방식"""
-        if not self.comm.is_connected:
-            messagebox.showwarning("경고", "시리얼 포트가 연결되지 않았습니다.")
-            return
-        
-        if not self.hvac_edit_mode:
-            # ========== 입력 모드 활성화 ==========
-            self.hvac_edit_mode = True
-            
-            # 현재 값을 임시 저장소에 복사
-            self.hvac_temp_data['refrigerant_valve_state_1'] = self.hvac_data['refrigerant_valve_state_1']
-            self.hvac_temp_data['refrigerant_valve_state_2'] = self.hvac_data['refrigerant_valve_state_2']
-            self.hvac_temp_data['compressor_state'] = self.hvac_data['compressor_state']
-            self.hvac_temp_data['dc_fan1'] = self.hvac_data['dc_fan1']
-            self.hvac_temp_data['dc_fan2'] = self.hvac_data['dc_fan2']
-            
-            # UI를 임시 저장소 값으로 초기화
-            colors = {'냉각': 'green', '제빙': 'blue', '핫가스': 'red', '보냉': 'orange'}
-            self.hvac_labels['refrigerant_valve_state_1'].config(
-                text=self.hvac_temp_data['refrigerant_valve_state_1'],
-                bg=colors.get(self.hvac_temp_data['refrigerant_valve_state_1'], 'gray')
-            )
-            
-            self.hvac_labels['refrigerant_valve_state_2'].config(
-                text=self.hvac_temp_data['refrigerant_valve_state_2'],
-                bg=colors.get(self.hvac_temp_data['refrigerant_valve_state_2'], 'gray')
-            )
-            
-            if self.hvac_temp_data['compressor_state'] == '동작중':
-                self.hvac_labels['compressor_state'].config(text="동작중", bg="green")
-            else:
-                self.hvac_labels['compressor_state'].config(text="미동작", bg="gray")
-            
-            if self.hvac_temp_data['dc_fan1'] == 'ON':
-                self.hvac_labels['dc_fan1'].config(text="ON", bg="green")
-            else:
-                self.hvac_labels['dc_fan1'].config(text="OFF", bg="gray")
-            
-            if self.hvac_temp_data['dc_fan2'] == 'ON':
-                self.hvac_labels['dc_fan2'].config(text="ON", bg="green")
-            else:
-                self.hvac_labels['dc_fan2'].config(text="OFF", bg="gray")
-            
-            # 버튼 텍스트 변경
-            self.hvac_send_btn.config(text="설정 완료 (CMD 0xB0 전송)")
-            
-            self.log_communication("공조 설정 입력 모드 활성화 (모든 설정 변경 가능)", "purple")
-        
-        else:
-            # ========== 입력 모드 비활성화 및 데이터 전송 ==========
-            try:
-                # 임시 저장소의 모든 값을 실제 데이터로 복사
-                self.hvac_data['refrigerant_valve_state_1'] = self.hvac_temp_data['refrigerant_valve_state_1']
-                self.hvac_data['refrigerant_valve_state_2'] = self.hvac_temp_data['refrigerant_valve_state_2']
-                self.hvac_data['compressor_state'] = self.hvac_temp_data['compressor_state']
-                self.hvac_data['dc_fan1'] = self.hvac_temp_data['dc_fan1']
-                self.hvac_data['dc_fan2'] = self.hvac_temp_data['dc_fan2']
-                
-                # DATA FIELD 구성 (4바이트) - RPS 제거
-                data_field = bytearray(4)
-                
-                # DATA 0: 냉매전환밸브 1 목표 (냉각=0, 제빙=1, 핫가스=2, 보냉=3)
-                valve_map = {'냉각': 0, '제빙': 1, '핫가스': 2, '보냉': 3}
-                data_field[0] = valve_map.get(self.hvac_data['refrigerant_valve_state_1'], 2)  # 기본값: 핫가스(2)
-                
-                # DATA 1: 냉매전환밸브 2 목표 (냉각=0, 제빙=1, 핫가스=2, 보냉=3)
-                data_field[1] = valve_map.get(self.hvac_data['refrigerant_valve_state_2'], 2)  # 기본값: 핫가스(2)
-                
-                # DATA 2: 압축기 상태 (동작=1, 미동작=0)
-                data_field[2] = 1 if self.hvac_data['compressor_state'] == '동작중' else 0
-                
-                # DATA 3: DC FAN 1 (압축기 팬, ON=1, OFF=0)
-                data_field[3] = 1 if self.hvac_data['dc_fan1'] == 'ON' else 0
-                
-                # DATA 4: DC FAN 2 (얼음탱크 팬, ON=1, OFF=0) - 주의: 4바이트이므로 인덱스 3까지만 사용
-                # 실제로는 4바이트이므로 data_field[3]이 마지막
-                
-                # 로그 출력
-                hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[공조 제어] CMD 0xB0 전송 (입력 모드 최종 설정)", "blue")
-                self.log_communication(f"  냉매전환밸브 1번 상태: {self.hvac_data['refrigerant_valve_state_1']} ({data_field[0]})", "gray")
-                self.log_communication(f"  냉매전환밸브 2번 상태: {self.hvac_data['refrigerant_valve_state_2']} ({data_field[1]})", "gray")
-                self.log_communication(f"  압축기 상태: {self.hvac_data['compressor_state']} ({data_field[2]})", "gray")
-                self.log_communication(f"  압축기 팬: {self.hvac_data['dc_fan1']} ({data_field[3]})", "gray")
-                self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
-                
-                # CMD 0xB0 패킷 전송
-                success, message = self.comm.send_packet(0xB0, bytes(data_field))
-                
-                if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB0, 4바이트)", "green")
-                    
-                    # 입력 모드 비활성화
-                    self.hvac_edit_mode = False
-                    
-                    # 버튼 텍스트 변경
-                    self.hvac_send_btn.config(text="입력모드")
-                    
-                else:
-                    self.log_communication(f"  전송 실패: {message}", "red")
-                    
-            except ValueError:
-                messagebox.showerror("오류", "올바른 숫자를 입력해주세요.")
-            except Exception as e:
-                self.log_communication(f"공조 제어 오류: {str(e)}", "red")
-    
-    def create_hvac_area(self, parent):
-        """공조시스템 섹션 생성"""
-        hvac_frame = ttk.LabelFrame(parent, text="공조시스템", padding="2")
-        hvac_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=1)
-        
-        # 냉매전환밸브 서브프레임
-        valve_subframe = ttk.LabelFrame(hvac_frame, text="냉매전환밸브", padding="3")
-        valve_subframe.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
-        
-        # 상태
-        state_frame = ttk.Frame(valve_subframe)
-        state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(state_frame, text="1번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['refrigerant_valve_state_1'] = tk.Label(state_frame, text="핫가스", 
-                                                            fg="white", bg="red", font=("Arial", 8, "bold"),
-                                                            width=8, relief="raised")
-        self.hvac_labels['refrigerant_valve_state_1'].pack(side=tk.RIGHT)
-        
-        # 목표 (버튼으로 변경 - 클릭 가능하게 설정)
-        target_frame = ttk.Frame(valve_subframe)
-        target_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(target_frame, text="2번 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['refrigerant_valve_state_2'] = tk.Label(target_frame, text="핫가스", 
-                                                            fg="white", bg="orange", font=("Arial", 8, "bold"),
-                                                            width=8, relief="raised", cursor="hand2")
-        self.hvac_labels['refrigerant_valve_state_2'].pack(side=tk.RIGHT)
-        
-        # 압축기 서브프레임
-        comp_subframe = ttk.LabelFrame(hvac_frame, text="압축기", padding="3")
-        comp_subframe.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
-        
-        # 상태 (버튼으로 변경 - 클릭 가능하게 설정)
-        comp_state_frame = ttk.Frame(comp_subframe)
-        comp_state_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(comp_state_frame, text="가동 상태:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['compressor_state'] = tk.Label(comp_state_frame, text="미동작", 
-                                                    fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                                    width=8, relief="raised", cursor="hand2")
-        self.hvac_labels['compressor_state'].pack(side=tk.RIGHT)
-        # 클릭 이벤트 바인딩 확인
-        self.hvac_labels['compressor_state'].bind("<Button-1>", self.toggle_compressor_state)
-        
-        # 현재 RPS
-        curr_rps_frame = ttk.Frame(comp_subframe)
-        curr_rps_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(curr_rps_frame, text="현재 RPS:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['current_rps'] = tk.Label(curr_rps_frame, text="0", 
-                                                font=("Arial", 8), bg="white", relief="sunken")
-        self.hvac_labels['current_rps'].pack(side=tk.RIGHT)
-        
-        # 안정화 시간
-        stabilization_frame = ttk.Frame(comp_subframe)
-        stabilization_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(stabilization_frame, text="안정화 시간:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['stabilization_time'] = tk.Label(stabilization_frame, text="0", 
-                                                       font=("Arial", 8), bg="white", relief="sunken")
-        self.hvac_labels['stabilization_time'].pack(side=tk.RIGHT)
-        
-        # 에러코드
-        error_frame = ttk.Frame(comp_subframe)
-        error_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(error_frame, text="에러코드:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['error_code'] = tk.Label(error_frame, text="0", 
-                                                font=("Arial", 8), bg="white", relief="sunken")
-        self.hvac_labels['error_code'].pack(side=tk.RIGHT)
-        
-        # DC FAN 1 (압축기 팬, 버튼으로 변경 - 클릭 가능하게 설정)
-        fan1_frame = ttk.Frame(comp_subframe)
-        fan1_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(fan1_frame, text="압축기 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['dc_fan1'] = tk.Label(fan1_frame, text="OFF", 
-                                            fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                            width=5, relief="raised", cursor="hand2")
-        self.hvac_labels['dc_fan1'].pack(side=tk.RIGHT)
-        # 클릭 이벤트 바인딩 확인
-        self.hvac_labels['dc_fan1'].bind("<Button-1>", self.toggle_dc_fan1)
-        
-        # DC FAN 2 (얼음탱크 팬, 버튼으로 변경 - 클릭 가능하게 설정)
-        fan2_frame = ttk.Frame(comp_subframe)
-        fan2_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
-        ttk.Label(fan2_frame, text="얼음탱크 팬:", font=("Arial", 8)).pack(side=tk.LEFT)
-        self.hvac_labels['dc_fan2'] = tk.Label(fan2_frame, text="OFF", 
-                                            fg="white", bg="gray", font=("Arial", 8, "bold"),
-                                            width=5, relief="raised", cursor="hand2")
-        self.hvac_labels['dc_fan2'].pack(side=tk.RIGHT)
-        # 클릭 이벤트 바인딩 확인
-        self.hvac_labels['dc_fan2'].bind("<Button-1>", self.toggle_dc_fan2)
-        
-        # CMD 0xB0 전송 버튼
-        send_btn_frame = ttk.Frame(hvac_frame)
-        send_btn_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 1))
-        self.hvac_send_btn = ttk.Button(send_btn_frame, text="입력모드",
-                                        command=self.send_hvac_control, state="disabled")
-        self.hvac_send_btn.pack(fill=tk.X)
-        
-        valve_subframe.columnconfigure(0, weight=1)
-        comp_subframe.columnconfigure(0, weight=1)
-        hvac_frame.columnconfigure(0, weight=1)
     
     # ============================================
     # 2. create_icemaking_area 메서드 전체 교체
@@ -1632,8 +1204,8 @@ class MainGUI:
                 # 냉동검토용 탭 - 그래프 1
                 self.fig1_freezing = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.temp_ax_freezing = self.fig1_freezing.add_subplot(1, 1, 1)
-                self.temp_ax_freezing.set_title("Temperature Sensors (Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.temp_ax_freezing.set_title("부하 출력 그래프", fontsize=8)
+                self.temp_ax_freezing.set_ylabel("ON/OFF", fontsize=7)
                 self.temp_ax_freezing.grid(True, alpha=0.3)
                 self.fig1_freezing.tight_layout()
                 
@@ -1645,9 +1217,9 @@ class MainGUI:
                 # 냉동검토용 탭 - 그래프 2
                 self.fig2_freezing = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.pressure_ax_freezing = self.fig2_freezing.add_subplot(1, 1, 1)
-                self.pressure_ax_freezing.set_title("Other Sensors (Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_title("Sensors", fontsize=8)
+                self.pressure_ax_freezing.set_ylabel("Value", fontsize=7)
+                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_freezing.grid(True, alpha=0.3)
                 self.fig2_freezing.tight_layout()
                 
@@ -1660,8 +1232,8 @@ class MainGUI:
                 # 제어검토용 탭 - 그래프 1
                 self.fig1_control = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.temp_ax_control = self.fig1_control.add_subplot(1, 1, 1)
-                self.temp_ax_control.set_title("Temperature Sensors (Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_control.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.temp_ax_control.set_title("부하 출력 그래프", fontsize=8)
+                self.temp_ax_control.set_ylabel("ON/OFF", fontsize=7)
                 self.temp_ax_control.grid(True, alpha=0.3)
                 self.fig1_control.tight_layout()
                 
@@ -1673,9 +1245,9 @@ class MainGUI:
                 # 제어검토용 탭 - 그래프 2
                 self.fig2_control = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.pressure_ax_control = self.fig2_control.add_subplot(1, 1, 1)
-                self.pressure_ax_control.set_title("Other Sensors (Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_title("Sensors", fontsize=8)
+                self.pressure_ax_control.set_ylabel("Value", fontsize=7)
+                self.pressure_ax_control.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_control.grid(True, alpha=0.3)
                 self.fig2_control.tight_layout()
                 
@@ -1724,8 +1296,8 @@ class MainGUI:
                                   width=6, relief="raised", bd=1, cursor="hand2")
             status_label.pack(side=tk.TOP, pady=(2, 0))
             
-            # 클릭 이벤트 바인딩 (밸브 제어 - 0xA0 전송)
-            status_label.bind("<Button-1>", lambda e, valve_num=i: self.send_valve_control(valve_num, 'NOS'))
+            # 클릭 이벤트 바인딩 (그래프 1에 표시)
+            status_label.bind("<Button-1>", lambda e, valve_num=i: self.toggle_graph1_item(f'nos_valve_{valve_num}'))
             
             # 탭별로 라벨 저장
             if is_freezing_tab:
@@ -1753,8 +1325,8 @@ class MainGUI:
                                   width=5, relief="raised", bd=1, cursor="hand2")
             status_label.pack(side=tk.LEFT, padx=(2, 0))
             
-            # 클릭 이벤트 바인딩 (밸브 제어 - 0xA0 전송)
-            status_label.bind("<Button-1>", lambda e, valve_num=i: self.send_valve_control(valve_num, 'FEED'))
+            # 클릭 이벤트 바인딩 (그래프 1에 표시)
+            status_label.bind("<Button-1>", lambda e, valve_num=i: self.toggle_graph1_item(f'feed_valve_{valve_num}'))
             
             # 탭별로 라벨 저장
             if is_freezing_tab:
@@ -1844,6 +1416,35 @@ class MainGUI:
         
         drain_tank_frame.columnconfigure(0, weight=1)
     
+    def create_other_status_area(self, parent):
+        """기타 상태 섹션 생성 (필터리드, 전면커버)"""
+        other_frame = ttk.LabelFrame(parent, text="기타", padding="2")
+        other_frame.grid(row=0, column=3, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(2, 0))
+        
+        # 필터리드 상태
+        filter_frame = ttk.Frame(other_frame)
+        filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        filter_frame.columnconfigure(0, weight=1)
+        ttk.Label(filter_frame, text="필터리드:", font=("Arial", 9), width=10).pack(side=tk.LEFT)
+        if not hasattr(self, 'other_status_labels'):
+            self.other_status_labels = {}
+        self.other_status_labels['filter_detected'] = tk.Label(filter_frame, text="미감지", 
+                                                              fg="white", bg="darkgray", font=("Arial", 8, "bold"),
+                                                              width=8, relief="raised")
+        self.other_status_labels['filter_detected'].pack(side=tk.RIGHT)
+        
+        # 전면커버 상태
+        cover_frame = ttk.Frame(other_frame)
+        cover_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=1)
+        cover_frame.columnconfigure(0, weight=1)
+        ttk.Label(cover_frame, text="전면커버:", font=("Arial", 9), width=10).pack(side=tk.LEFT)
+        self.other_status_labels['front_cover_detected'] = tk.Label(cover_frame, text="미감지", 
+                                                                    fg="white", bg="darkgray", font=("Arial", 8, "bold"),
+                                                                    width=8, relief="raised")
+        self.other_status_labels['front_cover_detected'].pack(side=tk.RIGHT)
+        
+        other_frame.columnconfigure(0, weight=1)
+    
     def create_control_sections(self, parent):
         """제어검토용 탭의 제어 관련 섹션들 생성"""
         # 제어 상태 섹션
@@ -1869,10 +1470,12 @@ class MainGUI:
         system_frame = ttk.Frame(control_cmd_frame)
         system_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
         self.control_buttons['start'] = tk.Button(system_frame, text="시스템 시작", 
-                                                 font=("Arial", 7), bg="lightgreen", width=10)
+                                                 font=("Arial", 7), bg="lightgreen", width=10,
+                                                 state="disabled")
         self.control_buttons['start'].pack(side=tk.LEFT, padx=(0, 2))
         self.control_buttons['stop'] = tk.Button(system_frame, text="시스템 정지", 
-                                                font=("Arial", 7), bg="lightcoral", width=10)
+                                                font=("Arial", 7), bg="lightcoral", width=10,
+                                                state="disabled")
         self.control_buttons['stop'].pack(side=tk.LEFT)
         
         # 설정값 섹션
@@ -1985,19 +1588,6 @@ class MainGUI:
                                        state="disabled")
         self.log_clear_btn.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
         
-        # CMD 전송 버튼들 (0xA0 제외)
-        cmd_frame = ttk.LabelFrame(right_frame, text="CMD 전송", padding="2")
-        cmd_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(3, 0))
-        
-        self.cmd_buttons = {}
-        cmds = [0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]  # 0xA0 제거
-        for cmd in cmds:
-            btn = ttk.Button(cmd_frame, text=f"CMD 0x{cmd:02X}",
-                           command=lambda c=cmd: self.send_cmd(c),
-                           state="disabled")
-            btn.pack(fill=tk.X, pady=1)
-            self.cmd_buttons[cmd] = btn
-        
         right_frame.columnconfigure(0, weight=1)
         
         # 포트 목록 초기화
@@ -2040,15 +1630,17 @@ class MainGUI:
                 self.baudrate_combo.config(state="disabled")
                 self.refresh_ports_btn.config(state="disabled")
                 
-                # CMD 버튼 활성화
-                for btn in self.cmd_buttons.values():
-                    btn.config(state="normal")
                 
                 # 각 시스템의 버튼 활성화 (set_connection_state 사용)
                 self.cooling_system.set_connection_state(True)
-                self.hvac_system.set_connection_state(True)
                 self.icemaking_system.set_connection_state(True)
                 self.refrigeration_system.set_connection_state(True)
+                
+                # 시스템 시작/정지 버튼 활성화
+                if hasattr(self, 'control_buttons') and self.control_buttons:
+                    for btn in self.control_buttons.values():
+                        if btn:
+                            btn.config(state="normal")
                 
                 # Log 추출/삭제 버튼 활성화
                 if hasattr(self, 'log_export_btn'):
@@ -2069,15 +1661,17 @@ class MainGUI:
                 self.baudrate_combo.config(state="readonly")
                 self.refresh_ports_btn.config(state="normal")
                 
-                # CMD 버튼 비활성화
-                for btn in self.cmd_buttons.values():
-                    btn.config(state="disabled")
                 
                 # 각 시스템의 버튼 비활성화 (set_connection_state 사용)
                 self.cooling_system.set_connection_state(False)
-                self.hvac_system.set_connection_state(False)
                 self.icemaking_system.set_connection_state(False)
                 self.refrigeration_system.set_connection_state(False)
+                
+                # 시스템 시작/정지 버튼 비활성화
+                if hasattr(self, 'control_buttons') and self.control_buttons:
+                    for btn in self.control_buttons.values():
+                        if btn:
+                            btn.config(state="disabled")
                 
                 # Log 추출/삭제 버튼 비활성화
                 if hasattr(self, 'log_export_btn'):
@@ -2086,11 +1680,6 @@ class MainGUI:
                     self.log_clear_btn.config(state="disabled")
                 
                 self.log_communication("연결 해제됨", "orange")
-    
-    def send_valve_control(self, valve_num, valve_type):
-        """밸브 제어 CMD 0xA0 전송 (개별 밸브만 제어) - valve_system 위임"""
-        # valve_system의 send_valve_control 메서드 사용
-        self.valve_system.send_valve_control(valve_num, valve_type)
     
     def send_cmd(self, cmd):
         """CMD 패킷 전송"""
@@ -2230,24 +1819,13 @@ class MainGUI:
                     self.process_freezing_status_response(data_field, tx_id)
                 else:
                     pass
-            # CMD 0x0F (구버전 호환용) 처리
-            elif cmd == 0x0F:
-                # POLLING [메인 → PC] 상태응답 처리
-                if tx_id == 0x02:  # 메인 → PC
-                    if self.debug_comm:
-                        pass
-                        # self.log_communication(f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X} (상태응답)", "green")
-                        # self.log_communication(f"   데이터: {hex_data}", "gray")
-                    self.process_status_response(data_field, tx_id)
-                else:
-                    pass
             else:
                 if self.debug_comm:
                     log_msg = f"✅ 패킷 수신 성공: {tx_name}, CMD 0x{cmd:02X}, 데이터: {hex_data}"
                     self.log_communication(log_msg, "green")
             
             # CMD별 데이터 처리
-            if cmd in [0xA0, 0xA1, 0xB0, 0xB1, 0xB2, 0xB3, 0xC0]:
+            if cmd in [0xB1, 0xB2, 0xB3, 0xC0]:
                 # CMD 0xB1 수신 처리 (냉각 제어 응답)
                 if cmd == 0xB1 and len(data_field) >= 4:
                     target_rps = data_field[0]  # TARGET RPS
@@ -2332,6 +1910,12 @@ class MainGUI:
                     self.valve_system.update_data(nos_states=valve_states['nos'], feed_states=None)
                 if valve_states.get('feed'):
                     self.valve_system.update_data(nos_states=None, feed_states=valve_states['feed'])
+            
+            # 필터리드 및 전면커버 상태 업데이트
+            if 'filter_detected' in parsed_data:
+                self.other_status['filter_detected'] = parsed_data['filter_detected']
+            if 'front_cover_detected' in parsed_data:
+                self.other_status['front_cover_detected'] = parsed_data['front_cover_detected']
             
         except Exception as e:
             self.log_communication(f"공통 상태조회 처리 오류: {str(e)}", "red")
@@ -2460,172 +2044,19 @@ class MainGUI:
             if parsed_data.get('drain_pump_data'):
                 self.drain_pump_system.update_data(parsed_data['drain_pump_data'])
             
+            # 탱크커버 데이터를 제빙 시스템에 전달
+            if parsed_data.get('tank_cover_data'):
+                tank_cover_state = parsed_data['tank_cover_data'].get('state', 0)
+                # icemaking_data가 이미 업데이트되었거나 새로 생성된 경우
+                if parsed_data.get('icemaking_data'):
+                    icemaking_data['tank_cover_state'] = tank_cover_state
+                    self.icemaking_system.update_data(icemaking_data)
+                else:
+                    # icemaking_data가 없는 경우에도 탱크커버만 업데이트
+                    self.icemaking_system.update_data({'tank_cover_state': tank_cover_state})
+            
         except Exception as e:
             self.log_communication(f"냉동 상태조회 처리 오류: {str(e)}", "red")
-    
-    def process_status_response(self, data_field, tx_id=None):
-        """CMD 0x0F (상태응답) 처리 - POLLING [메인 → PC] - 새로운 114바이트 구조 (구버전 호환용)"""
-        try:
-            if not data_field or len(data_field) == 0:
-                return
-            
-            # TX_ID가 MAIN_ID(0x02)일 때만 정상 데이터로 처리
-            if tx_id != 0x02:  # MAIN → PC
-                device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
-                tx_name = device_names.get(tx_id, f"0x{tx_id:02X}") if tx_id else "알 수 없음"
-                self.log_communication(
-                    f"⚠ 비정상 TX_ID: {tx_name} (정상: MAIN만 가능)",
-                    "orange"
-                )
-                return
-            
-            # 최소 114바이트 필요
-            if len(data_field) < 114:
-                if self.debug_comm:
-                    self.log_communication(
-                        f"⚠ CMD 0x0F 데이터 필드 길이 부족: {len(data_field)}바이트 (예상: 114바이트)",
-                        "orange"
-                    )
-                return
-            
-            # communication.py의 StatusResponseHandler를 사용하여 데이터 파싱
-            parsed_data = self.status_handler.parse_status_response(data_field, tx_id)
-            
-            # 센서 데이터 업데이트
-            if parsed_data.get('sensor_data'):
-                self.sensor_data.update(parsed_data['sensor_data'])
-                # 센서 데이터가 업데이트되면 그래프 데이터도 업데이트
-                self.update_all_graph_data()
-            
-            # 각 시스템 클래스에 데이터 전달
-            if parsed_data.get('hvac_data'):
-                self.hvac_system.update_data(parsed_data['hvac_data'])
-            
-            if parsed_data.get('cooling_data'):
-                cooling_data = parsed_data['cooling_data'].copy()
-                # operation_state를 'GOING'/'STOP'에서 '가동'/'대기'로 변환 (기존 코드 호환성)
-                if cooling_data.get('operation_state') == '가동':
-                    cooling_data['operation_state'] = 'GOING'
-                elif cooling_data.get('operation_state') == '대기':
-                    cooling_data['operation_state'] = 'STOP'
-                self.cooling_system.update_data(cooling_data)
-            
-            if parsed_data.get('icemaking_data'):
-                icemaking_data = parsed_data['icemaking_data'].copy()
-                # ice_step에 따라 operation 상태 결정
-                ice_step = icemaking_data.get('ice_step', 0)
-                icemaking_data['operation'] = self._get_icemaking_operation_from_step(ice_step)
-                
-                # 제빙 STEP에 따른 Heartbeat 제어
-                if ice_step == 22:
-                    if not self.comm.heartbeat_paused:
-                        self.comm.pause_heartbeat()
-                        if self.debug_comm:
-                            self.log_communication(
-                                f"  [제빙 STEP 22] Heartbeat 일시 중지 (12초 후 자동 재개 예정)",
-                                "orange"
-                            )
-                        
-                        if self.heartbeat_resume_timer is not None:
-                            self.heartbeat_resume_timer.cancel()
-                        
-                        self.heartbeat_resume_timer = threading.Timer(12.0, self._resume_heartbeat_after_delay)
-                        self.heartbeat_resume_timer.start()
-                else:
-                    if self.heartbeat_resume_timer is not None:
-                        self.heartbeat_resume_timer.cancel()
-                        self.heartbeat_resume_timer = None
-                    
-                    if self.comm.heartbeat_paused:
-                        self.comm.resume_heartbeat()
-                        if self.debug_comm:
-                            self.log_communication(
-                                f"  [제빙 STEP {ice_step}] Heartbeat 재개",
-                                "orange"
-                            )
-                
-                # 제빙테이블 자동 전송 처리
-                if ice_step == 22 and self.freezing_table_loaded and self.freezing_table_data is not None:
-                    if self.debug_comm:
-                        self.log_communication(
-                            f"  제빙 STEP이 22입니다. 제빙테이블 자동 전송을 시작합니다...",
-                            "purple"
-                        )
-                    
-                    water_temps = self.freezing_table_data['water_temps']
-                    hot_inlet_temp = self.sensor_data.get('hot_inlet_temp', 0)
-                    
-                    water_temp_idx = None
-                    min_diff = float('inf')
-                    for idx, temp in enumerate(water_temps):
-                        diff = abs(temp - hot_inlet_temp)
-                        if diff < min_diff:
-                            min_diff = diff
-                            water_temp_idx = idx
-                    
-                    if water_temp_idx is not None:
-                        if self.debug_comm:
-                            self.log_communication(
-                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행 {water_temp_idx} (테이블 입수온도: {water_temps[water_temp_idx]}℃) 선택",
-                                "cyan"
-                            )
-                        
-                        success = self.send_freezing_table_row(water_temp_idx)
-                        
-                        if self.debug_comm:
-                            if success:
-                                self.log_communication(f"  제빙테이블 자동 전송 완료", "green")
-                            else:
-                                self.log_communication(f"  제빙테이블 자동 전송 실패", "red")
-                    else:
-                        if self.debug_comm:
-                            self.log_communication(
-                                f"  온수입수온도 {hot_inlet_temp}℃에 해당하는 테이블 행을 찾을 수 없습니다.",
-                                "orange"
-                            )
-                elif ice_step == 22 and not self.freezing_table_loaded:
-                    if self.debug_comm:
-                        self.log_communication(
-                            f"  제빙 STEP이 22이지만 제빙테이블이 로드되지 않았습니다.",
-                            "orange"
-                        )
-                
-                self.icemaking_system.update_data(icemaking_data)
-            
-            if parsed_data.get('refrigeration_data'):
-                self.refrigeration_system.update_data(parsed_data['refrigeration_data'])
-            
-            if parsed_data.get('drain_tank_data'):
-                self.drain_tank_system.update_data(parsed_data['drain_tank_data'])
-            
-            if parsed_data.get('drain_pump_data'):
-                self.drain_pump_system.update_data(parsed_data['drain_pump_data'])
-            
-            if parsed_data.get('valve_states'):
-                valve_states = parsed_data['valve_states']
-                if valve_states.get('nos'):
-                    self.valve_system.update_data(nos_states=valve_states['nos'], feed_states=None)
-                if valve_states.get('feed'):
-                    self.valve_system.update_data(nos_states=None, feed_states=valve_states['feed'])
-            
-            # 기존 코드와의 호환성을 위해 하드코딩된 변수도 업데이트 (점진적 마이그레이션)
-            # TODO: 나중에 완전히 제거
-            if parsed_data.get('hvac_data'):
-                # self.hvac_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
-                pass
-            
-            if parsed_data.get('cooling_data'):
-                # self.cooling_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
-                pass
-            
-            if parsed_data.get('icemaking_data'):
-                # self.icemaking_data는 더 이상 사용하지 않지만, 기존 코드 호환성을 위해 유지
-                pass
-            
-            # 기존 하드코딩된 로직 제거 (위에서 StatusResponseHandler로 처리)
-            
-        except Exception as e:
-            self.log_communication(f"상태응답 처리 오류: {str(e)}", "red")
     
     def log_sent_data(self, data):
         """송신 데이터 로그"""
@@ -2646,9 +2077,7 @@ class MainGUI:
             cmd = data[2]  # RX ID 제거로 인덱스 변경
             data_len = data[3]  # DATA LENGTH
             
-            # Heartbeat는 생략
-            if cmd != 0x0F:
-                if self.debug_comm:
+            if self.debug_comm:
                     tx_id = data[1]
                     
                     device_names = {0x01: "PC", 0x02: "MAIN", 0x03: "FRONT"}
@@ -2848,9 +2277,26 @@ class MainGUI:
         if item_key in self.graph1_active_items:
             self.graph1_active_items.remove(item_key)
             self.update_item_visual(item_key, False, graph_num=1)
+            # 그래프에서 제거되었음을 로그로 표시
+            if item_key.startswith('nos_valve_'):
+                valve_num = item_key.split('_')[2]
+                self.log_communication(f"그래프 1에서 제거: NOS{valve_num}", "gray")
+            elif item_key.startswith('feed_valve_'):
+                valve_num = item_key.split('_')[2]
+                self.log_communication(f"그래프 1에서 제거: FEED{valve_num}", "gray")
         else:
             self.graph1_active_items.add(item_key)
             self.update_item_visual(item_key, True, graph_num=1)
+            # 그래프에 추가되었음을 로그로 표시
+            if item_key.startswith('nos_valve_'):
+                valve_num = item_key.split('_')[2]
+                self.log_communication(f"그래프 1에 추가: NOS{valve_num}", "blue")
+            elif item_key.startswith('feed_valve_'):
+                valve_num = item_key.split('_')[2]
+                self.log_communication(f"그래프 1에 추가: FEED{valve_num}", "blue")
+        
+        # 그래프 즉시 업데이트
+        self.update_graphs()
     
     def toggle_graph2_item(self, item_key):
         """그래프2 항목 토글"""
@@ -2890,22 +2336,37 @@ class MainGUI:
         try:
             if item_key.startswith('nos_valve_'):
                 valve_num = int(item_key.split('_')[2])
-                label = self.nos_valve_labels[valve_num]
+                # 냉동검토용 탭과 제어검토용 탭 모두 확인
+                label = None
+                if hasattr(self, 'nos_valve_labels_freezing') and valve_num in self.nos_valve_labels_freezing:
+                    label = self.nos_valve_labels_freezing[valve_num]
+                elif hasattr(self, 'nos_valve_labels_control') and valve_num in self.nos_valve_labels_control:
+                    label = self.nos_valve_labels_control[valve_num]
+                elif hasattr(self, 'nos_valve_labels') and valve_num in self.nos_valve_labels:
+                    label = self.nos_valve_labels[valve_num]
             elif item_key.startswith('feed_valve_'):
                 valve_num = int(item_key.split('_')[2])
-                label = self.feed_valve_labels[valve_num]
+                # 냉동검토용 탭과 제어검토용 탭 모두 확인
+                label = None
+                if hasattr(self, 'feed_valve_labels_freezing') and valve_num in self.feed_valve_labels_freezing:
+                    label = self.feed_valve_labels_freezing[valve_num]
+                elif hasattr(self, 'feed_valve_labels_control') and valve_num in self.feed_valve_labels_control:
+                    label = self.feed_valve_labels_control[valve_num]
+                elif hasattr(self, 'feed_valve_labels') and valve_num in self.feed_valve_labels:
+                    label = self.feed_valve_labels[valve_num]
             elif item_key in self.sensor_labels:
                 label = self.sensor_labels[item_key]
             else:
                 return
             
-            if selected:
-                label.config(relief="solid", bd=3)
-            else:
-                if item_key.startswith('valve_'):
-                    label.config(relief="raised", bd=1)
+            if label:
+                if selected:
+                    label.config(relief="solid", bd=3)
                 else:
-                    label.config(relief="sunken", bd=1)
+                    if item_key.startswith('nos_valve_') or item_key.startswith('feed_valve_'):
+                        label.config(relief="raised", bd=1)
+                    else:
+                        label.config(relief="sunken", bd=1)
         except (KeyError, ValueError):
             pass
     
@@ -2960,40 +2421,40 @@ class MainGUI:
         # NOS 밸브 상태 업데이트 (양쪽 탭 모두)
         if hasattr(self.valve_system, 'nos_valve_states'):
             for valve_num, is_closed in self.valve_system.nos_valve_states.items():
-                # 냉동검토용 탭
+            # 냉동검토용 탭
                 if hasattr(self.valve_system, 'nos_valve_labels') and valve_num in self.valve_system.nos_valve_labels:
                     label = self.valve_system.nos_valve_labels[valve_num]
-                    if is_closed:
-                        label.config(text="CLOSE", bg="red")
-                    else:
-                        label.config(text="OPEN", bg="blue")
-                
-                # 제어검토용 탭
+                if is_closed:
+                    label.config(text="CLOSE", bg="red")
+                else:
+                    label.config(text="OPEN", bg="blue")
+            
+            # 제어검토용 탭
                 if hasattr(self.valve_system, 'nos_valve_labels_control') and valve_num in self.valve_system.nos_valve_labels_control:
                     label = self.valve_system.nos_valve_labels_control[valve_num]
-                    if is_closed:
-                        label.config(text="CLOSE", bg="red")
-                    else:
-                        label.config(text="OPEN", bg="blue")
+                if is_closed:
+                    label.config(text="CLOSE", bg="red")
+                else:
+                    label.config(text="OPEN", bg="blue")
         
         # FEED 밸브 상태 업데이트 (양쪽 탭 모두)
         if hasattr(self.valve_system, 'feed_valve_states'):
             for valve_num, is_open in self.valve_system.feed_valve_states.items():
-                # 냉동검토용 탭
+            # 냉동검토용 탭
                 if hasattr(self.valve_system, 'feed_valve_labels') and valve_num in self.valve_system.feed_valve_labels:
                     label = self.valve_system.feed_valve_labels[valve_num]
-                    if is_open:
-                        label.config(text="OPEN", bg="blue")
-                    else:
-                        label.config(text="CLOSE", bg="red")
-                
-                # 제어검토용 탭
+                if is_open:
+                    label.config(text="OPEN", bg="blue")
+                else:
+                    label.config(text="CLOSE", bg="red")
+            
+            # 제어검토용 탭
                 if hasattr(self.valve_system, 'feed_valve_labels_control') and valve_num in self.valve_system.feed_valve_labels_control:
                     label = self.valve_system.feed_valve_labels_control[valve_num]
-                    if is_open:
-                        label.config(text="OPEN", bg="blue")
-                    else:
-                        label.config(text="CLOSE", bg="red")
+                if is_open:
+                    label.config(text="OPEN", bg="blue")
+                else:
+                    label.config(text="CLOSE", bg="red")
         
         # 센서 데이터 업데이트
         for sensor_key, value in self.sensor_data.items():
@@ -3021,7 +2482,23 @@ class MainGUI:
         # 드레인 펌프 상태 업데이트 (시스템 클래스의 update_gui 메서드 사용)
         self.drain_pump_system._update_gui()
         
-        
+        # 기타 상태 업데이트 (필터리드, 전면커버)
+        if hasattr(self, 'other_status_labels'):
+            # 필터리드 상태
+            if 'filter_detected' in self.other_status_labels:
+                filter_detected = self.other_status.get('filter_detected', False)
+                if filter_detected:
+                    self.other_status_labels['filter_detected'].config(text="감지", bg="darkgreen")
+                else:
+                    self.other_status_labels['filter_detected'].config(text="미감지", bg="darkgray")
+            
+            # 전면커버 상태
+            if 'front_cover_detected' in self.other_status_labels:
+                front_cover_detected = self.other_status.get('front_cover_detected', False)
+                if front_cover_detected:
+                    self.other_status_labels['front_cover_detected'].config(text="감지", bg="darkgreen")
+                else:
+                    self.other_status_labels['front_cover_detected'].config(text="미감지", bg="darkgray")
 
         # 보냉시스템 데이터 업데이트
         refrigeration_data = self.refrigeration_system.get_data()
@@ -3039,26 +2516,162 @@ class MainGUI:
         if len(self.all_graph_data['time']) < 2:
             return
         
+        try:
+            times = list(self.all_graph_data['time'])
+            
+            # 냉동검토용 탭의 그래프 1 업데이트
+            if hasattr(self, 'temp_ax_freezing'):
+                self.temp_ax_freezing.clear()
+                self.temp_ax_freezing.set_title("Selected Items (Graph 1 - Output)", fontsize=8)
+                self.temp_ax_freezing.set_ylabel("Value", fontsize=7)
+                self.temp_ax_freezing.set_xlabel("Time", fontsize=7)
+                self.temp_ax_freezing.grid(True, alpha=0.3)
+                
+                colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan', 'magenta', 'yellow', 'black']
+                color_idx = 0
+                
+                for item_key in self.graph1_active_items:
+                    # 데이터가 없어도 그래프에 표시 (빈 데이터로라도)
+                    if item_key in self.all_graph_data:
+                        values = list(self.all_graph_data[item_key])
+                        if len(values) == 0:
+                            # 데이터가 없으면 현재 시간에 0 값 추가
+                            if len(times) > 0:
+                                values_plot = [0] * len(times)
+                                times_plot = times
+                            else:
+                                continue
+                        elif len(values) != len(times):
+                            min_len = min(len(times), len(values))
+                            times_plot = times[-min_len:] if len(times) > min_len else times
+                            values_plot = values[-min_len:] if len(values) > min_len else values
+                        else:
+                            times_plot = times
+                            values_plot = values
+                        
+                        color = colors[color_idx % len(colors)]
+                        
+                        if item_key.startswith('nos_valve_'):
+                            label = f"NOS{item_key.split('_')[2]}"
+                        elif item_key.startswith('feed_valve_'):
+                            label = f"FEED{item_key.split('_')[2]}"
+                        elif item_key == 'cooling_operation':
+                            label = "Cooling Op"
+                        elif item_key == 'cooling_on_temp':
+                            label = "Cool ON Temp"
+                        elif item_key == 'cooling_off_temp':
+                            label = "Cool OFF Temp"
+                        elif item_key == 'icemaking_time':
+                            label = "Ice Time"
+                        elif item_key == 'icemaking_capacity':
+                            label = "Ice Capacity"
+                        elif item_key == 'drain_tank_level':
+                            label = "Tank Level"
+                        elif item_key == 'drain_pump_state':
+                            label = "Pump State"
+                        else:
+                            label = item_key
+                        
+                        self.temp_ax_freezing.plot(times_plot, values_plot, color=color, label=label, linewidth=1.5)
+                        color_idx += 1
+                
+                if self.graph1_active_items:
+                    self.temp_ax_freezing.legend(fontsize=6)
+                
+                self.fig1_freezing.tight_layout()
+                try:
+                    self.canvas1_freezing.draw_idle()
+                except Exception:
+                    pass
+            
+            # 제어검토용 탭의 그래프 1 업데이트
+            if hasattr(self, 'temp_ax_control'):
+                self.temp_ax_control.clear()
+                self.temp_ax_control.set_title("Selected Items (Graph 1 - Control)", fontsize=8)
+                self.temp_ax_control.set_ylabel("Value", fontsize=7)
+                self.temp_ax_control.set_xlabel("Time", fontsize=7)
+                self.temp_ax_control.grid(True, alpha=0.3)
+                
+                colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan', 'magenta', 'yellow', 'black']
+                color_idx = 0
+                
+                for item_key in self.graph1_active_items:
+                    # 데이터가 없어도 그래프에 표시 (빈 데이터로라도)
+                    if item_key in self.all_graph_data:
+                        values = list(self.all_graph_data[item_key])
+                        if len(values) == 0:
+                            # 데이터가 없으면 현재 시간에 0 값 추가
+                            if len(times) > 0:
+                                values_plot = [0] * len(times)
+                                times_plot = times
+                            else:
+                                continue
+                        elif len(values) != len(times):
+                            min_len = min(len(times), len(values))
+                            times_plot = times[-min_len:] if len(times) > min_len else times
+                            values_plot = values[-min_len:] if len(values) > min_len else values
+                        else:
+                            times_plot = times
+                            values_plot = values
+                        
+                        color = colors[color_idx % len(colors)]
+                        
+                        if item_key.startswith('nos_valve_'):
+                            label = f"NOS{item_key.split('_')[2]}"
+                        elif item_key.startswith('feed_valve_'):
+                            label = f"FEED{item_key.split('_')[2]}"
+                        elif item_key == 'cooling_operation':
+                            label = "Cooling Op"
+                        elif item_key == 'cooling_on_temp':
+                            label = "Cool ON Temp"
+                        elif item_key == 'cooling_off_temp':
+                            label = "Cool OFF Temp"
+                        elif item_key == 'icemaking_time':
+                            label = "Ice Time"
+                        elif item_key == 'icemaking_capacity':
+                            label = "Ice Capacity"
+                        elif item_key == 'drain_tank_level':
+                            label = "Tank Level"
+                        elif item_key == 'drain_pump_state':
+                            label = "Pump State"
+                        else:
+                            label = item_key
+                        
+                        self.temp_ax_control.plot(times_plot, values_plot, color=color, label=label, linewidth=1.5)
+                        color_idx += 1
+                
+                if self.graph1_active_items:
+                    self.temp_ax_control.legend(fontsize=6)
+                
+                self.fig1_control.tight_layout()
+                try:
+                    self.canvas1_control.draw_idle()
+                except Exception:
+                    pass
+        
+        except Exception as e:
+            print(f"그래프 1 업데이트 오류: {e}")
+        
         # 그래프 2에 표시할 센서가 없으면 그래프를 그리지 않음
         if not self.graph2_active_items:
             # 그래프 2를 비워둠
             if hasattr(self, 'pressure_ax_freezing'):
                 self.pressure_ax_freezing.clear()
-                self.pressure_ax_freezing.set_title("Selected Sensors (Graph 2 - Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_title("Selected Sensors (Graph 2 - Freezing)", fontsize=8)
+                self.pressure_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7)
+                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_freezing.grid(True, alpha=0.3)
                 self.fig2_freezing.tight_layout()
                 try:
                     self.canvas2_freezing.draw_idle()
                 except Exception:
                     pass
-            
+
             if hasattr(self, 'pressure_ax_control'):
                 self.pressure_ax_control.clear()
-                self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8)
+                self.pressure_ax_control.set_ylabel("Temperature (°C)", fontsize=7)
+                self.pressure_ax_control.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_control.grid(True, alpha=0.3)
                 self.fig2_control.tight_layout()
                 try:
@@ -3072,9 +2685,9 @@ class MainGUI:
             # 냉동검토용 탭의 그래프 2 업데이트
             if hasattr(self, 'pressure_ax_freezing'):
                 self.pressure_ax_freezing.clear()
-                self.pressure_ax_freezing.set_title("Selected Sensors (Graph 2 - Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_title("Selected Sensors (Graph 2 - Freezing)", fontsize=8)
+                self.pressure_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7)
+                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_freezing.grid(True, alpha=0.3)
                 
                 sensor_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink']
@@ -3123,9 +2736,9 @@ class MainGUI:
             # 제어검토용 탭의 그래프 2 업데이트
             if hasattr(self, 'pressure_ax_control'):
                 self.pressure_ax_control.clear()
-                self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_title("Selected Sensors (Graph 2 - Control)", fontsize=8)
+                self.pressure_ax_control.set_ylabel("Temperature (°C)", fontsize=7)
+                self.pressure_ax_control.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_control.grid(True, alpha=0.3)
                 
                 sensor_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink']

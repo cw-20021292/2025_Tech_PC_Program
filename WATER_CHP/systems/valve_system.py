@@ -9,16 +9,18 @@ from tkinter import ttk
 class ValveSystem:
     """밸브 시스템 클래스"""
     
-    def __init__(self, root, comm, log_callback):
+    def __init__(self, root, comm, log_callback, toggle_graph1_callback=None):
         """
         Args:
             root: Tkinter 루트 윈도우
             comm: SerialCommunication 객체
             log_callback: 로그 출력 콜백 함수
+            toggle_graph1_callback: 그래프 1 토글 콜백 함수
         """
         self.root = root
         self.comm = comm
         self.log_communication = log_callback
+        self.toggle_graph1_callback = toggle_graph1_callback
         
         # 데이터 저장소
         self.nos_valve_states = {i: False for i in range(1, 6)}  # False=CLOSE, True=OPEN
@@ -88,53 +90,12 @@ class ValveSystem:
         return valve_frame
     
     def _on_valve_click(self, valve_num, valve_type):
-        """밸브 클릭 이벤트 처리"""
-        if not self.comm.is_connected:
-            return
-        
-        # 밸브 제어 CMD 0xA0 전송
-        self.send_valve_control(valve_num, valve_type)
+        """밸브 클릭 이벤트 처리 - 그래프 1에 표시"""
+        # 그래프 1에 밸브 상태 표시
+        if self.toggle_graph1_callback:
+            item_key = f'{valve_type.lower()}_valve_{valve_num}'
+            self.toggle_graph1_callback(item_key)
     
-    def send_valve_control(self, valve_num, valve_type):
-        """밸브 제어 CMD 0xA0 전송"""
-        if not self.comm.is_connected:
-            return
-        
-        try:
-            # 모든 밸브 상태를 DATA FIELD로 구성 (20바이트)
-            data_field = bytearray(20)
-            
-            # NOS 밸브 1~5 (DATA 1~5): 1=OPEN, 0=CLOSE
-            for i in range(1, 6):
-                data_field[i-1] = 0x01 if self.nos_valve_states.get(i, False) else 0x00
-            
-            # FEED 밸브 1~15 (DATA 6~20): 1=OPEN, 0=CLOSE
-            for i in range(1, 16):
-                data_field[5+i-1] = 0x01 if self.feed_valve_states.get(i, False) else 0x00
-            
-            # 클릭한 밸브만 토글
-            if valve_type == 'NOS':
-                current_state = self.nos_valve_states.get(valve_num, False)
-                new_state_value = 0x00 if current_state else 0x01
-                data_field[valve_num-1] = new_state_value
-                self.nos_valve_states[valve_num] = not current_state
-            else:  # FEED
-                current_state = self.feed_valve_states.get(valve_num, False)
-                new_state_value = 0x00 if current_state else 0x01
-                data_field[5+valve_num-1] = new_state_value
-                self.feed_valve_states[valve_num] = not current_state
-            
-            # CMD 0xA0 패킷 전송
-            success, message = self.comm.send_packet(0xA0, bytes(data_field))
-            
-            if success:
-                valve_name = f"{valve_type}{valve_num}"
-                self.log_communication(f"[밸브 제어] {valve_name} 토글 전송 성공", "green")
-            else:
-                self.log_communication(f"[밸브 제어] 전송 실패: {message}", "red")
-                
-        except Exception as e:
-            self.log_communication(f"밸브 제어 오류: {str(e)}", "red")
     
     def update_data(self, nos_states=None, feed_states=None):
         """데이터 업데이트"""

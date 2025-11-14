@@ -11329,7 +11329,7 @@ Lib
         &lt;cg_security6 Name="cg_security6" Value="00" /&gt;
         &lt;ocdstart Name="ocdstart" Value="3FF00" /&gt;
         &lt;cg_onchip Name="cg_onchip" Value="" /&gt;
-        &lt;cg_security2 Name="cg_security2" Value="00" /&gt;
+        &lt;cg_security4 Name="cg_security4" Value="00" /&gt;
         &lt;cg_iawctl_value Name="cg_iawctl_value" Value="00" /&gt;
         &lt;cg_ocd_ram_size Name="cg_ocd_ram_size" Value="256" /&gt;
         &lt;wdt_option Name="wdt_option" Value="FF" /&gt;

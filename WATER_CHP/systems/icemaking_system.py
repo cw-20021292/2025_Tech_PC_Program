@@ -34,7 +34,8 @@ class IcemakingSystem:
             'swing_on_time': 0,
             'swing_off_time': 0,
             'tray_position': 0,           # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
-            'ice_jam_state': 0            # 얼음걸림 상태 (0:없음, 1:걸림)
+            'ice_jam_state': 0,           # 얼음걸림 상태 (0:없음, 1:걸림)
+            'tank_cover_state': 0         # 탱크커버 상태 (0:미감지, 1:감지)
         }
         
         # 입력 모드 상태
@@ -61,97 +62,123 @@ class IcemakingSystem:
         # 제빙 동작 (토글 버튼)
         operation_frame = ttk.Frame(icemaking_frame)
         operation_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=1)
+        operation_frame.columnconfigure(0, weight=1)
         ttk.Label(operation_frame, text="제빙 동작:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.labels['operation'] = tk.Label(operation_frame, text="대기", 
                                             fg="white", bg="blue", font=("Arial", 8, "bold"),
                                             width=10, relief="raised", cursor="hand2")
-        self.labels['operation'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['operation'].pack(side=tk.RIGHT)
         self.labels['operation'].bind("<Button-1>", self._toggle_operation)
         
         # 목표 RPS (입력 가능)
         target_rps_frame = ttk.Frame(icemaking_frame)
         target_rps_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=1)
+        target_rps_frame.columnconfigure(0, weight=1)
         ttk.Label(target_rps_frame, text="목표 RPS:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         vcmd_rps = (self.root.register(self._validate_rps), '%P')
         self.labels['target_rps'] = tk.Entry(target_rps_frame, font=("Arial", 9), 
                                              width=8, validate='key', validatecommand=vcmd_rps,
                                              state='readonly')
         self.labels['target_rps'].insert(0, "0")
-        self.labels['target_rps'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['target_rps'].pack(side=tk.RIGHT)
         
         # 제빙시간
         time_frame = ttk.Frame(icemaking_frame)
         time_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=1)
+        time_frame.columnconfigure(0, weight=1)
         ttk.Label(time_frame, text="제빙시간:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         vcmd_num = (self.root.register(self._validate_number), '%P')
-        self.labels['icemaking_time'] = tk.Entry(time_frame, font=("Arial", 9), 
+        time_unit_frame = ttk.Frame(time_frame)
+        time_unit_frame.pack(side=tk.RIGHT)
+        self.labels['icemaking_time'] = tk.Entry(time_unit_frame, font=("Arial", 9), 
                                                  width=8, validate='key', validatecommand=vcmd_num,
                                                  state='readonly')
         self.labels['icemaking_time'].insert(0, "0")
-        self.labels['icemaking_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(time_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['icemaking_time'].pack(side=tk.LEFT)
+        ttk.Label(time_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 입수 용량
         capacity_frame = ttk.Frame(icemaking_frame)
         capacity_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=1)
+        capacity_frame.columnconfigure(0, weight=1)
         ttk.Label(capacity_frame, text="입수 용량:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.labels['water_capacity'] = tk.Entry(capacity_frame, font=("Arial", 9), 
+        capacity_unit_frame = ttk.Frame(capacity_frame)
+        capacity_unit_frame.pack(side=tk.RIGHT)
+        self.labels['water_capacity'] = tk.Entry(capacity_unit_frame, font=("Arial", 9), 
                                                  width=8, validate='key', validatecommand=vcmd_num,
                                                  state='readonly')
         self.labels['water_capacity'].insert(0, "0")
-        self.labels['water_capacity'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(capacity_frame, text="Hz", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['water_capacity'].pack(side=tk.LEFT)
+        ttk.Label(capacity_unit_frame, text="Hz", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 스윙바 ON 시간
         swing_on_frame = ttk.Frame(icemaking_frame)
         swing_on_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=1)
+        swing_on_frame.columnconfigure(0, weight=1)
         ttk.Label(swing_on_frame, text="스윙바 ON:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.labels['swing_on_time'] = tk.Entry(swing_on_frame, font=("Arial", 9), 
+        swing_on_unit_frame = ttk.Frame(swing_on_frame)
+        swing_on_unit_frame.pack(side=tk.RIGHT)
+        self.labels['swing_on_time'] = tk.Entry(swing_on_unit_frame, font=("Arial", 9), 
                                                 width=8, validate='key', validatecommand=vcmd_num,
                                                 state='readonly')
         self.labels['swing_on_time'].insert(0, "0")
-        self.labels['swing_on_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(swing_on_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['swing_on_time'].pack(side=tk.LEFT)
+        ttk.Label(swing_on_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 스윙바 OFF 시간
         swing_off_frame = ttk.Frame(icemaking_frame)
         swing_off_frame.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=1)
+        swing_off_frame.columnconfigure(0, weight=1)
         ttk.Label(swing_off_frame, text="스윙바 OFF:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
-        self.labels['swing_off_time'] = tk.Entry(swing_off_frame, font=("Arial", 9), 
+        swing_off_unit_frame = ttk.Frame(swing_off_frame)
+        swing_off_unit_frame.pack(side=tk.RIGHT)
+        self.labels['swing_off_time'] = tk.Entry(swing_off_unit_frame, font=("Arial", 9), 
                                                  width=8, validate='key', validatecommand=vcmd_num,
                                                  state='readonly')
         self.labels['swing_off_time'].insert(0, "0")
-        self.labels['swing_off_time'].pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(swing_off_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.labels['swing_off_time'].pack(side=tk.LEFT)
+        ttk.Label(swing_off_unit_frame, text="ms", font=("Arial", 9)).pack(side=tk.LEFT, padx=(2, 0))
         
         # 트레이 위치
         tray_position_frame = ttk.Frame(icemaking_frame)
         tray_position_frame.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=1)
+        tray_position_frame.columnconfigure(0, weight=1)
         ttk.Label(tray_position_frame, text="트레이위치:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.labels['tray_position'] = tk.Label(tray_position_frame, text="제빙", 
                                                 fg="white", bg="gray", font=("Arial", 8, "bold"),
                                                 width=10, relief="raised")
-        self.labels['tray_position'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['tray_position'].pack(side=tk.RIGHT)
         
         # 얼음걸림 상태
         ice_jam_frame = ttk.Frame(icemaking_frame)
         ice_jam_frame.grid(row=8, column=0, sticky=(tk.W, tk.E), pady=1)
+        ice_jam_frame.columnconfigure(0, weight=1)
         ttk.Label(ice_jam_frame, text="얼음걸림:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
         self.labels['ice_jam_state'] = tk.Label(ice_jam_frame, text="없음", 
-                                                fg="white", bg="green", font=("Arial", 8, "bold"),
+                                                fg="white", bg="darkgreen", font=("Arial", 8, "bold"),
                                                 width=10, relief="raised")
-        self.labels['ice_jam_state'].pack(side=tk.LEFT, padx=(2, 0))
+        self.labels['ice_jam_state'].pack(side=tk.RIGHT)
+        
+        # 탱크커버 상태
+        tank_cover_frame = ttk.Frame(icemaking_frame)
+        tank_cover_frame.grid(row=9, column=0, sticky=(tk.W, tk.E), pady=1)
+        tank_cover_frame.columnconfigure(0, weight=1)
+        ttk.Label(tank_cover_frame, text="탱크커버:", font=("Arial", 9), width=9).pack(side=tk.LEFT)
+        self.labels['tank_cover_state'] = tk.Label(tank_cover_frame, text="미감지", 
+                                                   fg="white", bg="darkgray", font=("Arial", 8, "bold"),
+                                                   width=10, relief="raised")
+        self.labels['tank_cover_state'].pack(side=tk.RIGHT)
         
         # CMD 0xB2 전송 버튼
         send_btn_frame = ttk.Frame(icemaking_frame)
-        send_btn_frame.grid(row=9, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        send_btn_frame.grid(row=10, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
         self.send_btn = ttk.Button(send_btn_frame, text="제빙 설정 입력 모드",
                                    command=self.send_control, state="disabled")
         self.send_btn.pack(fill=tk.X)
         
         # 제빙테이블 적용 버튼
         table_btn_frame = ttk.Frame(icemaking_frame)
-        table_btn_frame.grid(row=10, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
+        table_btn_frame.grid(row=11, column=0, sticky=(tk.W, tk.E), pady=(5, 1))
         self.table_btn = ttk.Button(table_btn_frame, text="제빙테이블 적용",
                                    command=self._apply_freezing_table, state="disabled")
         self.table_btn.pack(fill=tk.X)
@@ -373,7 +400,7 @@ class IcemakingSystem:
             tray_pos = self.data.get('tray_position', 0)
             tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
             tray_pos_text = tray_pos_map.get(tray_pos, f'알 수 없음({tray_pos})')
-            tray_pos_colors = {0: 'blue', 1: 'orange', 2: 'yellow', 3: 'red'}
+            tray_pos_colors = {0: 'blue', 1: 'green', 2: 'black', 3: 'red'}
             tray_pos_color = tray_pos_colors.get(tray_pos, 'gray')
             
             if self.labels['tray_position'].cget('text') != tray_pos_text:
@@ -383,10 +410,19 @@ class IcemakingSystem:
         if 'ice_jam_state' in self.labels:
             ice_jam = self.data.get('ice_jam_state', 0)
             ice_jam_text = '걸림' if ice_jam == 1 else '없음'
-            ice_jam_color = 'red' if ice_jam == 1 else 'green'
+            ice_jam_color = 'darkred' if ice_jam == 1 else 'darkgreen'
             
             if self.labels['ice_jam_state'].cget('text') != ice_jam_text:
                 self.labels['ice_jam_state'].config(text=ice_jam_text, bg=ice_jam_color)
+        
+        # 탱크커버 상태 업데이트
+        if 'tank_cover_state' in self.labels:
+            tank_cover = self.data.get('tank_cover_state', 0)
+            tank_cover_text = '감지' if tank_cover == 1 else '미감지'
+            tank_cover_color = 'darkgreen' if tank_cover == 1 else 'darkgray'
+            
+            if self.labels['tank_cover_state'].cget('text') != tank_cover_text:
+                self.labels['tank_cover_state'].config(text=tank_cover_text, bg=tank_cover_color)
     
     def _apply_freezing_table(self):
         """제빙테이블 적용 버튼 클릭 시 호출"""

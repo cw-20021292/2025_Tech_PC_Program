@@ -93,8 +93,8 @@ class GraphSystem:
                 # 냉동검토용 탭 - 그래프 1
                 self.fig1_freezing = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.temp_ax_freezing = self.fig1_freezing.add_subplot(1, 1, 1)
-                self.temp_ax_freezing.set_title("Temperature Sensors (Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_freezing.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.temp_ax_freezing.set_title("센서 데이터", fontsize=8)
+                self.temp_ax_freezing.set_ylabel("ON/OFF", fontsize=7)
                 self.temp_ax_freezing.grid(True, alpha=0.3)
                 self.fig1_freezing.tight_layout()
                 
@@ -106,9 +106,9 @@ class GraphSystem:
                 # 냉동검토용 탭 - 그래프 2
                 self.fig2_freezing = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.pressure_ax_freezing = self.fig2_freezing.add_subplot(1, 1, 1)
-                self.pressure_ax_freezing.set_title("Other Sensors (Freezing)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_freezing.set_title("Sensors", fontsize=8)
+                self.pressure_ax_freezing.set_ylabel("℃", fontsize=7)
+                self.pressure_ax_freezing.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_freezing.grid(True, alpha=0.3)
                 self.fig2_freezing.tight_layout()
                 
@@ -121,8 +121,8 @@ class GraphSystem:
                 # 제어검토용 탭 - 그래프 1
                 self.fig1_control = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.temp_ax_control = self.fig1_control.add_subplot(1, 1, 1)
-                self.temp_ax_control.set_title("Temperature Sensors (Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.temp_ax_control.set_ylabel("Temperature (°C)", fontsize=7, fontfamily='DejaVu Sans')
+                self.temp_ax_control.set_title("부하 출력 그래프", fontsize=8,)
+                self.temp_ax_control.set_ylabel("Temperature (°C)", fontsize=7,)
                 self.temp_ax_control.grid(True, alpha=0.3)
                 self.fig1_control.tight_layout()
                 
@@ -134,9 +134,9 @@ class GraphSystem:
                 # 제어검토용 탭 - 그래프 2
                 self.fig2_control = Figure(figsize=(3.2, 2.0), dpi=80)
                 self.pressure_ax_control = self.fig2_control.add_subplot(1, 1, 1)
-                self.pressure_ax_control.set_title("Other Sensors (Control)", fontsize=8, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
-                self.pressure_ax_control.set_xlabel("Time", fontsize=7, fontfamily='DejaVu Sans')
+                self.pressure_ax_control.set_title("Sensors", fontsize=8)
+                self.pressure_ax_control.set_ylabel("Value", fontsize=7)
+                self.pressure_ax_control.set_xlabel("Time", fontsize=7)
                 self.pressure_ax_control.grid(True, alpha=0.3)
                 self.fig2_control.tight_layout()
                 
@@ -225,7 +225,7 @@ class GraphSystem:
             # 냉동검토용 탭의 그래프 1 업데이트
             if self.temp_ax_freezing:
                 self.temp_ax_freezing.clear()
-                self.temp_ax_freezing.set_title("Selected Items (Graph 1 - Freezing)", fontsize=8, fontfamily='DejaVu Sans')
+                self.temp_ax_freezing.set_title("Selected Items (Graph 1 - Output)", fontsize=8, fontfamily='DejaVu Sans')
                 self.temp_ax_freezing.set_ylabel("Value", fontsize=7, fontfamily='DejaVu Sans')
                 self.temp_ax_freezing.grid(True, alpha=0.3)
                 

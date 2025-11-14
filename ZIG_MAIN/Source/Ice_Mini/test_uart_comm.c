@@ -37,6 +37,9 @@ extern bit F_Safety_Routine;
 extern U8 gu8IceLEV;
 extern bit bit_cold_first_op;
 extern bit F_IceInit;
+extern bit bit_filter_reed;
+extern bit bit_filter_cover;
+
 void AT_UART_Communication(void);
 void AT_UART_Rx_Process(void);
 void AT_UART_Tx_Process(void);
@@ -229,26 +232,28 @@ void Parse_F0_Protocol(F0_COMMON_SYSTEM_DATA_FIELD *p_F0_DataField)
     /* πÎ∫Í ªÛ≈¬ (DATAFIELD 14-38) */
     // NOS πÎ∫Í: 1=CLOSE, 0=OPEN
     p_F0_DataField->u8ValveNOS1 = pVALVE_NOS;                                 // CMD 75: πÎ∫Í NOS 1
-    p_F0_DataField->u8ValveNOS2 = 1;                                           // CMD 76: πÎ∫Í NOS 2
-    p_F0_DataField->u8ValveNOS3 = 1;                                           // CMD 77: πÎ∫Í NOS 3
-    p_F0_DataField->u8ValveNOS4 = 1;                                           // CMD 78: πÎ∫Í NOS 4
+    p_F0_DataField->u8ValveNOS2 = pVALVE_HOT_DRAIN;                                           // CMD 76: πÎ∫Í NOS 2
+    p_F0_DataField->u8ValveNOS3 = pVALVE_COLD_DRAIN;                                           // CMD 77: πÎ∫Í NOS 3
+    p_F0_DataField->u8ValveNOS4 = pVALVE_HOT_COLD_OVERFLOW;                                           // CMD 78: πÎ∫Í NOS 4
     p_F0_DataField->u8ValveNOS5 = 1;                                           // CMD 79: πÎ∫Í NOS 5
     // FEED πÎ∫Í: 1=OPEN, 0=CLOSE
     p_F0_DataField->u8ValveFEED1 = pVALVE_ROOM_IN;                                          // CMD 80: πÎ∫Í FEED 1
     p_F0_DataField->u8ValveFEED2 = pVALVE_HOT_IN;                                          // CMD 81: πÎ∫Í FEED 2
     p_F0_DataField->u8ValveFEED3 = pVALVE_COLD_IN;                                          // CMD 82: πÎ∫Í FEED 3
     p_F0_DataField->u8ValveFEED4 = pVALVE_ICE_TRAY_IN;                                          // CMD 83: πÎ∫Í FEED 4
-    p_F0_DataField->u8ValveFEED5 = pVALVE_HOT_DRAIN;                                          // CMD 84: πÎ∫Í FEED 5
-    p_F0_DataField->u8ValveFEED6 = pVALVE_COLD_DRAIN;                                          // CMD 85: πÎ∫Í FEED 6
-    p_F0_DataField->u8ValveFEED7 = pVALVE_HOT_COLD_OVERFLOW;                                          // CMD 86: πÎ∫Í FEED 7
-    p_F0_DataField->u8ValveFEED8 = pVALVE_ROOM_COLD_EXTRACT;                                          // CMD 87: πÎ∫Í FEED 8
-    p_F0_DataField->u8ValveFEED9 = pVALVE_HOT_OUT;                                          // CMD 88: πÎ∫Í FEED 9
-    p_F0_DataField->u8ValveFEED10 = pVALVE_ICE_WATER_EXTRACT;                                         // CMD 89: πÎ∫Í FEED 10
+    p_F0_DataField->u8ValveFEED5 = pVALVE_ROOM_COLD_EXTRACT;                                          // CMD 84: πÎ∫Í FEED 5
+    p_F0_DataField->u8ValveFEED6 = pVALVE_HOT_OUT;                                          // CMD 85: πÎ∫Í FEED 6
+    p_F0_DataField->u8ValveFEED7 = pVALVE_ICE_WATER_EXTRACT;                                          // CMD 86: πÎ∫Í FEED 7
+    p_F0_DataField->u8ValveFEED8 = 0;                                          // CMD 87: πÎ∫Í FEED 8
+    p_F0_DataField->u8ValveFEED9 = 0;                                          // CMD 88: πÎ∫Í FEED 9
+    p_F0_DataField->u8ValveFEED10 = 0;                                         // CMD 89: πÎ∫Í FEED 10
     p_F0_DataField->u8ValveFEED11 = 0;                                         // CMD 90: πÎ∫Í FEED 11
     p_F0_DataField->u8ValveFEED12 = 0;                                         // CMD 91: πÎ∫Í FEED 12
     p_F0_DataField->u8ValveFEED13 = 0;                                         // CMD 92: πÎ∫Í FEED 13
     p_F0_DataField->u8ValveFEED14 = 0;                                         // CMD 93: πÎ∫Í FEED 14
     p_F0_DataField->u8ValveFEED15 = 0;                                         // CMD 94: πÎ∫Í FEED 15
+    p_F0_DataField->u8FilterReed = bit_filter_reed;
+    p_F0_DataField->u8FrontReed = bit_filter_cover;
 }
 
 void Parse_F1_Protocol(F1_COLD_SYSTEM_DATA_FIELD *p_F1_DataField)
@@ -301,9 +306,29 @@ void Parse_F1_Protocol(F1_COLD_SYSTEM_DATA_FIELD *p_F1_DataField)
     p_F1_DataField->u8KeepColdTrayPosition = gu8IceLEV;
 
     /* µÂ∑π¿Œ ≈ ≈© (DATAFIELD 63-71) */
-    p_F1_DataField->u8DrainTankLowLevel = (Bit0_Drain_Water_Empty == SET) ? 1 : 0;
-    p_F1_DataField->u8DrainTankFullLevel = (Bit2_Drain_Water_High == SET) ? 1 : 0;
-    p_F1_DataField->u8DrainWaterLevelStatus = u8DrainWaterLevel;
+    p_F1_DataField->u8DrainTankLowLevel = pLEVEL_ICE_DRAIN_LOW;
+    p_F1_DataField->u8DrainTankFullLevel = pLEVEL_ICE_DRAIN_HIGH;
+    if(u8DrainWaterLevel == 1)
+    {
+        p_F1_DataField->u8DrainWaterLevelStatus = 0;
+    }
+    else if(u8DrainWaterLevel == 2)
+    {
+        p_F1_DataField->u8DrainWaterLevelStatus = 1;
+    }
+    else if(u8DrainWaterLevel == 4)
+    {
+        p_F1_DataField->u8DrainWaterLevelStatus = 2;
+    }
+    else if(u8DrainWaterLevel == 8)
+    {
+        p_F1_DataField->u8DrainWaterLevelStatus = 3;
+    }
+    else
+    {
+        p_F1_DataField->u8DrainWaterLevelStatus = 4;
+    }
+
     p_F1_DataField->u8DrainPumpOutput = F_Drain_Pump_Output;
 
     /* ±‚≈∏ (DATAFIELD 72-74) */

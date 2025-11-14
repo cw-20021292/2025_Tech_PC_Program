@@ -28,7 +28,7 @@ class RefrigerationSystem:
             'target_rps': 0,               # 보냉진행 설정 RPS
             'target_temp': 0,              # 보냉진행 설정온도
             'target_first_temp': 0,        # 보냉진행 첫 온도
-            'cur_tray_position': '제빙',    # 제빙/중간/탈빙
+            'cur_tray_position': 0,        # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
         }
         
         # 입력 모드 상태
@@ -38,7 +38,7 @@ class RefrigerationSystem:
             'target_rps': 0,
             'target_temp': 0,
             'target_first_temp': 0,
-            'cur_tray_position': '제빙',
+            'cur_tray_position': 0,  # 트레이 위치 (0:제빙, 1:탈빙, 2:이동중, 3:에러)
         }
         
         # GUI 위젯 참조
@@ -174,12 +174,12 @@ class RefrigerationSystem:
         if not self.edit_mode:
             return
         
-        # 제빙(0) / 탈빙(1)만 지원
-        if self.temp_data['cur_tray_position'] == '제빙':
-            self.temp_data['cur_tray_position'] = '탈빙'
+        # 제빙(0) / 탈빙(1)만 지원 (입력 모드에서는 0과 1만 토글)
+        if self.temp_data['cur_tray_position'] == 0:
+            self.temp_data['cur_tray_position'] = 1
             self.labels['cur_tray_position'].config(text='탈빙', bg='green')
         else:
-            self.temp_data['cur_tray_position'] = '제빙'
+            self.temp_data['cur_tray_position'] = 0
             self.labels['cur_tray_position'].config(text='제빙', bg='blue')
     
     def send_control(self):
@@ -212,10 +212,12 @@ class RefrigerationSystem:
             self.labels['target_first_temp'].insert(0, str(self.temp_data['target_first_temp']))
             
             # 트레이 위치 라벨을 클릭 가능하게 표시
-            if self.temp_data['cur_tray_position'] == '제빙':
-                self.labels['cur_tray_position'].config(text="제빙", bg="blue")
-            else:
-                self.labels['cur_tray_position'].config(text="탈빙", bg="green")
+            tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
+            tray_pos_colors = {0: 'blue', 1: 'green', 2: 'black', 3: 'red'}  # icemaking_system과 동일
+            tray_pos = self.temp_data['cur_tray_position']
+            tray_pos_text = tray_pos_map.get(tray_pos, f'알 수 없음({tray_pos})')
+            tray_pos_color = tray_pos_colors.get(tray_pos, 'blue')
+            self.labels['cur_tray_position'].config(text=tray_pos_text, bg=tray_pos_color)
             
             # 버튼 텍스트 변경
             self.send_btn.config(text="설정 완료 (CMD 0xB4 전송)")
@@ -253,8 +255,8 @@ class RefrigerationSystem:
                     messagebox.showwarning("경고", "첫 온도는 -40~80℃ 범위여야 합니다.")
                     return
                 
-                # 트레이 위치: 제빙(0) / 탈빙(1)
-                tray_position = 0 if self.temp_data['cur_tray_position'] == '제빙' else 1
+                # 트레이 위치: 제빙(0) / 탈빙(1) / 이동중(2) / 에러(3)
+                tray_position = self.temp_data['cur_tray_position']
                 
                 # DATA FIELD 구성 (4바이트)
                 data_field = bytearray(4)
@@ -357,11 +359,17 @@ class RefrigerationSystem:
         
         # 트레이 위치 (입력 모드가 아닐 때만 업데이트)
         if 'cur_tray_position' in self.labels and not self.edit_mode:
-            colors = {'제빙': 'blue', '중간': 'orange', '탈빙': 'green'}
-            color = colors.get(self.data['cur_tray_position'], 'gray')
-            self.labels['cur_tray_position'].config(
-                text=self.data['cur_tray_position'], bg=color
-            )
+            tray_pos = self.data.get('cur_tray_position', 0)
+            tray_pos_map = {0: '제빙', 1: '탈빙', 2: '이동중', 3: '에러'}
+            tray_pos_text = tray_pos_map.get(tray_pos, f'알 수 없음({tray_pos})')
+            tray_pos_colors = {0: 'blue', 1: 'green', 2: 'black', 3: 'red'}  # icemaking_system과 동일
+            tray_pos_color = tray_pos_colors.get(tray_pos, 'blue')
+            
+            # 항상 업데이트 (값이 같아도 색상이 다를 수 있으므로)
+            current_text = self.labels['cur_tray_position'].cget('text')
+            current_bg = self.labels['cur_tray_position'].cget('bg')
+            if current_text != tray_pos_text or current_bg != tray_pos_color:
+                self.labels['cur_tray_position'].config(text=tray_pos_text, bg=tray_pos_color)
     
     def set_connection_state(self, connected):
         """연결 상태에 따라 버튼 활성화/비활성화"""
