@@ -55,7 +55,7 @@
 extern U16 HexToAsc(U8 mu8RxdData);
 extern U8 AscToHex(U8 mu8RxdData1, U8 mu8RxdData2);
 extern void R_UART0_Start(void);
-extern U16 Rx_CRC_CCITT(U8 *puchMsg, U8 usDataLen);
+extern U16 CRC_Cal(U8 *puchMsg, U8 usDataLen);
 
 
 //

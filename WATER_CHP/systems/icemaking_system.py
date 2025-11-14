@@ -240,12 +240,24 @@ class IcemakingSystem:
             self.temp_data['swing_on_time'] = self.data['swing_on_time']
             self.temp_data['swing_off_time'] = self.data['swing_off_time']
             
-            # Entry 위젯들을 편집 가능하게 설정
+            # Entry 위젯들을 편집 가능하게 설정 (목표 RPS, 입수용량, 스윙바 ON/OFF 입력 가능)
             self.labels['target_rps'].config(state='normal', bg='lightyellow')
-            self.labels['icemaking_time'].config(state='normal', bg='lightyellow')
+            # 제빙시간은 입력 불가능 (현재 값 유지)
+            # self.labels['icemaking_time'].config(state='normal', bg='lightyellow')  # 입력 불가능
             self.labels['water_capacity'].config(state='normal', bg='lightyellow')
+            # 스윙바 시간은 입력 가능
             self.labels['swing_on_time'].config(state='normal', bg='lightyellow')
             self.labels['swing_off_time'].config(state='normal', bg='lightyellow')
+            
+            # Entry 위젯에 현재 값 설정
+            self.labels['target_rps'].delete(0, tk.END)
+            self.labels['target_rps'].insert(0, str(self.temp_data['target_rps']))
+            self.labels['water_capacity'].delete(0, tk.END)
+            self.labels['water_capacity'].insert(0, str(self.temp_data['water_capacity']))
+            self.labels['swing_on_time'].delete(0, tk.END)
+            self.labels['swing_on_time'].insert(0, str(self.temp_data['swing_on_time']))
+            self.labels['swing_off_time'].delete(0, tk.END)
+            self.labels['swing_off_time'].insert(0, str(self.temp_data['swing_off_time']))
             
             # 제빙 동작 라벨 UI 업데이트
             if self.temp_data['operation'] == '동작':
@@ -261,21 +273,22 @@ class IcemakingSystem:
         else:
             # 입력 모드 비활성화 및 데이터 전송
             try:
-                # 입력 값 가져오기
+                # 입력 값 가져오기 (목표 RPS, 입수용량, 스윙바 ON/OFF 입력 가능)
                 target_rps_str = self.labels['target_rps'].get()
-                icemaking_time_str = self.labels['icemaking_time'].get()
                 water_capacity_str = self.labels['water_capacity'].get()
                 swing_on_str = self.labels['swing_on_time'].get()
                 swing_off_str = self.labels['swing_off_time'].get()
                 
-                # 빈 값 체크
-                if not target_rps_str or not icemaking_time_str or not water_capacity_str or not swing_on_str or not swing_off_str:
-                    messagebox.showwarning("경고", "모든 값을 입력해주세요.")
+                # 제빙시간은 현재 데이터에서 가져오기 (입력 불가능)
+                icemaking_time = self.data.get('icemaking_time', 0)
+                
+                # 빈 값 체크 (입력 가능한 필드만)
+                if not target_rps_str or not water_capacity_str or not swing_on_str or not swing_off_str:
+                    messagebox.showwarning("경고", "목표 RPS, 입수용량, 스윙바 ON/OFF 시간을 모두 입력해주세요.")
                     return
                 
                 # 정수로 변환
                 target_rps = int(float(target_rps_str))
-                icemaking_time = int(float(icemaking_time_str))
                 water_capacity = int(float(water_capacity_str))
                 swing_on = int(float(swing_on_str))
                 swing_off = int(float(swing_off_str))
@@ -283,10 +296,6 @@ class IcemakingSystem:
                 # 범위 체크
                 if not (constants.RPS_MIN <= target_rps <= constants.RPS_MAX):
                     messagebox.showwarning("경고", f"목표 RPS는 {constants.RPS_MIN}~{constants.RPS_MAX} 범위여야 합니다.")
-                    return
-                
-                if not (0 <= icemaking_time <= 65535):
-                    messagebox.showwarning("경고", "제빙시간은 0~65535ms 범위여야 합니다.")
                     return
                 
                 if not (0 <= water_capacity <= 65535):
@@ -301,54 +310,41 @@ class IcemakingSystem:
                     messagebox.showwarning("경고", "스윙바 OFF 시간은 0~255ms 범위여야 합니다.")
                     return
                 
-                # TARGET TEMP 가져오기 (기본값 사용)
-                target_temp = self.data.get('target_temp', 0)
-                icemaking_operation = 1 if self.temp_data['operation'] == '동작' else 0
-                
-                # 범위 체크
-                if not (-127 <= target_temp <= 127):
-                    messagebox.showwarning("경고", "목표 온도는 -127~127℃ 범위여야 합니다.")
-                    return
-                
                 # 임시 저장소의 값을 실제 데이터로 복사
-                self.data['operation'] = self.temp_data['operation']
                 self.data['target_rps'] = target_rps
-                self.data['icemaking_time'] = icemaking_time
                 self.data['water_capacity'] = water_capacity
                 self.data['swing_on_time'] = swing_on
                 self.data['swing_off_time'] = swing_off
                 
-                # DATA FIELD 구성 (7바이트)
-                data_field = bytearray(7)
-                data_field[0] = target_rps  # TARGET RPS
-                data_field[1] = self.comm.protocol.int_to_signed_byte(target_temp)  # TARGET TEMP (signed byte)
-                data_field[2] = icemaking_operation  # 제빙 동작 (0: 대기, 1: 동작)
-                data_field[3] = (icemaking_time >> 8) & 0xFF  # 제빙시간(ms) 상위 1B
-                data_field[4] = icemaking_time & 0xFF  # 제빙시간(ms) 하위 1B
-                data_field[5] = (water_capacity >> 8) & 0xFF  # 입수용량(Hz) 상위 1BYTE
-                data_field[6] = water_capacity & 0xFF  # 입수용량(Hz) 하위 1BYTE
+                # DATA FIELD 구성 (5바이트)
+                data_field = bytearray(5)
+                data_field[0] = target_rps  # DATA 1: TARGET RPS
+                data_field[1] = (water_capacity >> 8) & 0xFF  # DATA 2: 입수용량 HIGH
+                data_field[2] = water_capacity & 0xFF  # DATA 3: 입수용량 LOW
+                data_field[3] = swing_on & 0xFF  # DATA 4: 스윙바 ON 시간
+                data_field[4] = swing_off & 0xFF  # DATA 5: 스윙바 OFF 시간
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[제빙 제어] CMD 0xB2 전송 (7바이트)", "blue")
+                self.log_communication(f"[제빙 제어] CMD 0xB2 전송 (5바이트)", "blue")
                 self.log_communication(f"  목표 RPS: {target_rps}", "gray")
-                self.log_communication(f"  목표 온도: {target_temp}℃", "gray")
-                self.log_communication(f"  제빙 동작: {self.temp_data['operation']} (0x{data_field[2]:02X})", "gray")
-                self.log_communication(f"  제빙시간: {icemaking_time}ms", "gray")
-                self.log_communication(f"  입수 용량: {water_capacity}Hz", "gray")
+                self.log_communication(f"  입수 용량: {water_capacity}Hz (HIGH: 0x{data_field[1]:02X}, LOW: 0x{data_field[2]:02X})", "gray")
+                self.log_communication(f"  스윙바 ON: {swing_on}ms", "gray")
+                self.log_communication(f"  스윙바 OFF: {swing_off}ms", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
-                # CMD 0xB2 패킷 전송
-                success, message = self.comm.send_packet(0xB2, bytes(data_field))
+                # CMD 0xB2 패킷 전송 (우선순위, 응답을 받을 때까지 재전송)
+                success, message = self.comm.send_packet(0xB2, bytes(data_field), priority=True, retry_until_response=True)
                 
                 if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB2, 7바이트)", "green")
+                    self.log_communication(f"  전송 요청 성공 (CMD 0xB2, 5바이트, 우선순위 큐 추가됨)", "green")
                     
                     # 입력 모드 비활성화
                     self.edit_mode = False
                     
                     # Entry 위젯들을 읽기 전용으로 설정
-                    self.labels['icemaking_time'].config(state='readonly', bg='white')
+                    self.labels['target_rps'].config(state='readonly', bg='white')
+                    # 제빙시간은 이미 읽기 전용
                     self.labels['water_capacity'].config(state='readonly', bg='white')
                     self.labels['swing_on_time'].config(state='readonly', bg='white')
                     self.labels['swing_off_time'].config(state='readonly', bg='white')

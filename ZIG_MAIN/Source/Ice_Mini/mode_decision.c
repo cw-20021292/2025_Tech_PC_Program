@@ -10,7 +10,7 @@
 #include    "Global_Variable.h"
 #include    "Port_Define.h"
 #include    "mode_decision.h"
-
+#include    "App_Comm_Protocol.h"
 void Make_Mode_Decision(void);
 void cold_mode_decision(void);
 void ice_mode_decision(void);
@@ -179,7 +179,7 @@ void cold_mode_decision(void)
     {
         Bit5_Cold_Flushing_Stop = CLEAR;
     }
-    
+
     /* 트레이 고온살균중에는 냉각 금지 */
     if( bit_ice_tank_ster_start == CLEAR )
     {
@@ -237,7 +237,7 @@ void ice_mode_decision(void)
     Bit3_Ice_Stop_Six_Hour = ~bit_sleep_mode_start;
 
     Bit4_Ice_Init_Ice_Stop = ~F_IceInit;
-    
+
 
     /*..hui [19-12-18오후 1:49:10] 트레이 이동에러 재시도 진입중에는 제빙 정지 후 냉각 전환..*/
     Bit5_Ice_Stop_Safty_Routine = ~F_Safety_Routine;
@@ -269,7 +269,7 @@ void ice_mode_decision(void)
         gu16_drain_full_timer = 0;
         bit_drain_full_ice_stop = CLEAR;
     }
-    
+
     /*..hui [20-1-20오후 10:26:55] 코디 서비스 모드 진행 중 제빙 정지..*/
     /*..hui [23-12-20오후 5:14:23] 고장진단중일때는 정지..*/
 	/*.. sean [25-01-20] 고장 진단중에는 정지..*/
@@ -291,7 +291,7 @@ void ice_mode_decision(void)
     {
         Bit8_Ice_Stop_Flushing = CLEAR;
     }
-    
+
     /* 트레이 고온살균 중에는 제빙 금지 */
     if( bit_ice_tank_ster_start == CLEAR )
     {
@@ -520,7 +520,7 @@ U8 cold_comp_test(void)
                 else
                 {
                     mu16_cold_on_temp = COLD_ON_TEMP_10_20DE;
-                    
+
                     if( bit_cold_first_op == SET )
                     {
                         mu16_cold_off_temp = COLD_OFF_TEMP_10_20DE_FIRST;
@@ -594,7 +594,7 @@ U8 cold_comp_test(void)
                     /* 30'C~ */
                     mu16_cold_on_temp   = COLD_ON_TEMP_30DE_UPDER;
                     mu16_cold_off_temp  = COLD_OFF_TEMP_30DE_UPDER;
-                    
+
                     if( bit_cold_first_op == SET )
                     {
                         mu16_cold_delay_time = COLD_DELAY_TIME_30DE_UPDER_FIRST;
@@ -629,6 +629,22 @@ U8 cold_comp_test(void)
             gu16_display_cold_on_temp = 110;
             gu16_display_cold_off_temp = 70;
         }
+    }
+
+    /* CH.PARK 냉각 테이블 데이터 반영 */
+    if(GetB1ColdOnTemp() > 0)
+    {
+        SetB1ColdOnTemp((U8*)&mu16_cold_on_temp);
+    }
+
+    if(GetB1ColdOffTemp() > 0)
+    {
+        SetB1ColdOffTemp((U8*)&mu16_cold_off_temp);
+    }
+
+    if(GetB1ColdDelayTime() > 0)
+    {
+        SetB1ColdDelayTime(&mu16_cold_delay_time);
     }
 
     /*..hui [24-4-11오후 4:22:44] 디버깅.. 확인용..*/

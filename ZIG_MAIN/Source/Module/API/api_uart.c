@@ -1,12 +1,13 @@
 /**
  * File : api_uart.c
- * 
+ *
  * Application Programming Interface
  * Depend on HAL
 */
 
 #include "api_uart.h"
 #include "api_queue.h"
+#include "hal_serial.h"
 
 #ifdef USE_UART0_MODULE
 static uint8_t uart0_rx_buffer_array[UART0_RX_BUFFER_SIZE];
@@ -145,7 +146,7 @@ U8 Uart_Read_Data(teUART_CHANNEL channel, U8* data)
 static void Uart_Send_Trigger(teUART_CHANNEL channel)
 {
     U8 data = 0;
-    
+
     DI();
 
 #ifdef USE_UART0_MODULE
@@ -213,7 +214,7 @@ void Uart_Send_String(teUART_CHANNEL channel, const char *str_buf)
     U16 timeout = 1000;
     CircularQueue *queue = Get_Uart_Queue(channel, UART_DIR_TX);
 
-    len = strlen(str_buf); 
+    len = strlen(str_buf);
 
     for(index = 0; index < len; index++)
     {

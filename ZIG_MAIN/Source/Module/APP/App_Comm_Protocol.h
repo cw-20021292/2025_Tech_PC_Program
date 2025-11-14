@@ -1,6 +1,6 @@
 /**
  * File : App_Comm_Protocol.h
- * 
+ *
  * Application Programming Interface
  * Depend on API
 */
@@ -45,6 +45,24 @@ typedef enum
     PROTOCOL_B3_CMD = 0xB3,
     PROTOCOL_B3_LENGTH = 0,
 } PROTOCOL_B3_FREEZING_TABLE;
+
+typedef enum
+{
+    PROTOCOL_B1_CMD = 0xB1,
+    PROTOCOL_B1_LENGTH = 5,
+} PROTOCOL_B1_COLD_TABLE;
+
+typedef enum
+{
+    PROTOCOL_B2_CMD = 0xB2,
+    PROTOCOL_B2_LENGTH = 0,
+} PROTOCOL_B2_ICE_MAKE_TABLE;
+
+typedef enum
+{
+    PROTOCOL_B4_CMD = 0xB4,
+    PROTOCOL_B4_LENGTH = 0,
+} PROTOCOL_B4_ICE_STORAGE_TABLE;
 
 /* 통신 데이터 F0 구조체 */
 typedef struct
@@ -193,7 +211,60 @@ typedef struct
     U8 u8HeatingOpStatus;
 } F2_HEATING_SYSTEM_DATA_FIELD;
 
+typedef struct
+{
+    U8 u8ColdTargetRPS;    // 냉각 목표 RPS
+    U8 u8ColdOnTemp;       // 냉각 ON 온도
+    U8 u8ColdOffTemp;      // 냉각 OFF 온도
+    U16 u16ColdDelayTime;   // 냉각 추가기동 시간
+} B1_COLD_TABLE_DATA_FIELD;
+
+typedef struct
+{
+    U8 u8IceMakeTargetRPS;  // 제빙 목표 RPS
+    U16 u16TrayIn_Hz;       // 입수용량(Hz)
+    U8 u8SwingbarOn;        // 스윙바 ON 시간
+    U8 u8SwingbarOff;       // 스윙바 OFF 시간
+} B2_ICE_MAKE_TABLE_DATA_FIELD;
+
+typedef struct
+{
+    U8 u8IceStorageTargetRPS;  // 보냉 목표 RPS
+    U8 u8TargetTemp;           // 보냉 목표온도
+    U8 u8TargetTempFirst;      // 보냉 첫 목표온도
+    U8 u8TrayPosition;         // 보냉 트레이 위치
+} B4_ICE_STORAGE_TABLE_DATA_FIELD;
+
 U8 Protocol_Make_Ack_Packet(U8* buf, U8* Txbuf);
+U8 Protocol_Make_Cmd(U8 *buf);
+
+U8 GetB1ColdTargetRPS(void);
+void SetB1ColdTargetRPS(U8 *u8ColdTargetRPS);
+U8 GetB1ColdOnTemp(void);
+void SetB1ColdOnTemp(U8 *u8ColdOnTemp);
+U8 GetB1ColdOffTemp(void);
+void SetB1ColdOffTemp(U8 *u8ColdOffTemp);
+U16 GetB1ColdDelayTime(void);
+void SetB1ColdDelayTime(U16 *u16ColdDelayTime);
+
+U8 GetB2IceMakeTargetRPS(void);
+void SetB2IceMakeTargetRPS(U8 *u8IceMakeTargetRPS);
+U16 GetB2TrayIn_Hz(void);
+void SetB2TrayIn_Hz(U16 *u16TrayIn_Hz);
+U8 GetB2SwingbarOn(void);
+void SetB2SwingbarOn(U8 *u8SwingbarOn);
+U8 GetB2SwingbarOff(void);
+void SetB2SwingbarOff(U8 *u8SwingbarOff);
+
+U8 GetB4IceStorageTargetRPS(void);
+void SetB4IceStorageTargetRPS(U8 *u8IceStorageTargetRPS);
+U8 GetB4TargetTemp(void);
+void SetB4TargetTemp(U8 *u8TargetTemp);
+U8 GetB4TargetTempFirst(void);
+void SetB4TargetTempFirst(U8 *u8TargetTempFirst);
+U8 GetB4TrayPosition(void);
+void SetB4TrayPosition(U8 *u8TrayPosition);
+
 
 #endif /*__APP_COMM_PROTOCOL_H__*/
 

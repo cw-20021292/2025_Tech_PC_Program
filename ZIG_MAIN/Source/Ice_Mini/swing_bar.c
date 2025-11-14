@@ -10,6 +10,7 @@
 #include    "Global_Variable.h"
 #include    "Port_Define.h"
 #include    "swing_bar.h"
+#include    "App_Comm_Protocol.h"
 
 void output_swing_bar(void);
 
@@ -34,7 +35,7 @@ void output_swing_bar(void)
         gu8_cristal_timer--;
     }
     else{}
-		
+
     if(Bit2_Ice_Operation_Disable_State == SET
     || F_ErrTrayMotor_DualInital == SET
     || F_Safety_Routine == SET)
@@ -69,12 +70,28 @@ void output_swing_bar(void)
 
         if(F_Cristal == SET)
         {
-            gu8_cristal_timer = CRISTAL_ON;
+            if(GetB2SwingbarOn() > 0)
+            {
+                gu8_cristal_timer = GetB2SwingbarOn();
+            }
+            else
+            {
+                gu8_cristal_timer = CRISTAL_ON;
+            }
+
             pSWING_BAR = 1;
         }
         else
         {
-            gu8_cristal_timer = CRISTAL_OFF;
+            if(GetB2SwingbarOff() > 0)
+            {
+                gu8_cristal_timer = GetB2SwingbarOff();
+            }
+            else
+            {
+                gu8_cristal_timer = CRISTAL_OFF;
+            }
+
             pSWING_BAR = 0;
         }
     }

@@ -16,7 +16,7 @@ U8 AscToHex(U8 mu8RxdData1, U8 mu8RxdData2);
 U8 Nibble(U8 mu8RxdData);
 U8 Hex2Dec(U8 mu8Hex);
 U8 Dec2Hex(U8 mu8Dec);
-U16 Rx_CRC_CCITT(U8 *puchMsg, U8 usDataLen);
+U16 CRC_Cal(U8 *puchMsg, U8 usDataLen);
 //U8 get_CheckSum(const U8 *pData, U8 len);
 U8 get_Fahrenheit( U8 mu8_celcius );
 U16 DecToAsc(U8 mu8RxdData);
@@ -152,7 +152,7 @@ U8 Dec2Hex(U8 mu8Dec)
 * Function Name: System_ini
 * Description  :
 ***********************************************************************************************************************/
-U16 Rx_CRC_CCITT(U8 *puchMsg, U8 usDataLen)
+U16 CRC_Cal(U8 *puchMsg, U8 usDataLen)
 {
     U8 i = 0;
     unsigned short  wCRCin = 0x0000;

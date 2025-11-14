@@ -39,7 +39,7 @@
 #pragma interrupt INTSRE2 INTSRE2
 
 /* 공장 자동화검사 Uart 통신 */
-#if 1
+#if 0
 #pragma interrupt INTST3 INTST3
 #pragma interrupt INTSR3 INTSR3
 #endif
@@ -363,7 +363,7 @@ __interrupt void INTSRE2(void)
 
 }
 
-#if 1
+#if 0
 /***********************************************************************************************************************
  * Function Name: System_ini
  * Description  :

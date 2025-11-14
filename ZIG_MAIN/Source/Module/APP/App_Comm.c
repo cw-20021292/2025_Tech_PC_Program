@@ -1,6 +1,6 @@
 /**
  * File : App_Comm.c
- * 
+ *
  * User Application
  * Depend on API
 */
@@ -11,7 +11,27 @@
 
 tsCommInfo CommInfo = {0, };
 
-static U16 Rx_CRC_CCITT(U8 *puchMsg, U16 usDataLen)
+void SetCommState(teCommState state)
+{
+    CommInfo.comm_state = state;
+}
+
+teCommState GetCommState(void)
+{
+    return CommInfo.comm_state;
+}
+
+void SetCommRxIndex(U8 index)
+{
+    CommInfo.comm_rx_index = index;
+}
+
+U8 GetCommRxIndex(void)
+{
+    return CommInfo.comm_rx_index;
+}
+
+static U16 CRC_Cal(U8 *puchMsg, U16 usDataLen)
 {
     U8 i = 0;
     U16 wCRCin = 0x0000;
@@ -46,7 +66,7 @@ static void Comm_Send_Packet_Handler(void)
         CommInfo.comm_state = COMM_STATE_IDLE;
     }
 }
-
+U16 Debuglength = 0;
 static U8 Comm_isValidPacket(U8 *buf)
 {
     U16 calculated_crc = 0;
@@ -59,6 +79,7 @@ static U8 Comm_isValidPacket(U8 *buf)
     }
 
     packet_length = (PROTOCOL_IDX_LENGTH+1) + buf[PROTOCOL_IDX_LENGTH] + 3;
+    Debuglength = packet_length;
 
     if(packet_length < COMM_PACKET_BASIC_LENGTH || packet_length > UART3_RX_BUFFER_SIZE)
     {
@@ -70,7 +91,7 @@ static U8 Comm_isValidPacket(U8 *buf)
         return FALSE;
     }
 
-    calculated_crc = Rx_CRC_CCITT(buf, (U16)(packet_length - 3));
+    calculated_crc = CRC_Cal(buf, (U16)(packet_length - 3));
 
     if( buf[packet_length-3] != GET_16_HIGH_BYTE(calculated_crc) || buf[packet_length-2] != GET_16_LOW_BYTE(calculated_crc) )
     {
@@ -84,21 +105,21 @@ static U8 Comm_Make_Ack_Packet(U8 *buf)
 {
     U8 data_length = 0;
     U16 calculated_crc = 0;
-    
+
     CommInfo.comm_tx_buffer[PROTOCOL_IDX_STX] = COMM_STX;
     CommInfo.comm_tx_buffer[PROTOCOL_IDX_ID] = COMM_ID_MAIN;
-    CommInfo.comm_tx_buffer[PROTOCOL_IDX_CMD] = buf[PROTOCOL_IDX_CMD];
-    
+    CommInfo.comm_tx_buffer[PROTOCOL_IDX_CMD] = Protocol_Make_Cmd(buf);
+
     data_length = Protocol_Make_Ack_Packet(buf, &CommInfo.comm_tx_buffer[PROTOCOL_IDX_DATA]);
     CommInfo.comm_tx_buffer[PROTOCOL_IDX_LENGTH] = data_length;
-    
-    calculated_crc = Rx_CRC_CCITT(CommInfo.comm_tx_buffer, (U8)(4 + data_length));
+
+    calculated_crc = CRC_Cal(CommInfo.comm_tx_buffer, (U8)(4 + data_length));
     CommInfo.comm_tx_buffer[4 + data_length] = GET_16_HIGH_BYTE(calculated_crc);
     CommInfo.comm_tx_buffer[4 + data_length + 1] = GET_16_LOW_BYTE(calculated_crc);
     CommInfo.comm_tx_buffer[4 + data_length + 2] = COMM_ETX;
 
     CommInfo.comm_tx_index = 4 + data_length + 2 + 1;
-    
+
     return TRUE;
 }
 
@@ -114,8 +135,8 @@ static void Comm_Rcv_Packet_Handler(void)
                 if( data == COMM_STX )
                 {
                     //_MEMSET_((void __FAR*)&CommInfo, 0, sizeof(tsCommInfo));
-                    CommInfo.comm_state = COMM_STATE_RECEIVING;
-                    CommInfo.comm_rx_index = 0;
+                    SetCommState(COMM_STATE_RECEIVING);
+                    SetCommRxIndex(0);
                     CommInfo.comm_rx_buffer[CommInfo.comm_rx_index++] = data;
                 }
                 break;
@@ -128,19 +149,20 @@ static void Comm_Rcv_Packet_Handler(void)
                     if(Comm_isValidPacket(CommInfo.comm_rx_buffer) == TRUE)
                     {
                         Comm_Make_Ack_Packet(CommInfo.comm_rx_buffer);
-                        CommInfo.comm_state = COMM_STATE_TRANSMIT;
-                        CommInfo.comm_rx_index = 0;
+
+                        SetCommState(COMM_STATE_TRANSMIT);
+                        SetCommRxIndex(0);
                     }
                     else
                     {
-                        CommInfo.comm_state = COMM_STATE_IDLE;
-                        CommInfo.comm_rx_index = 0;
+                        // SetCommState(COMM_STATE_IDLE);
+                        // SetCommRxIndex(0);
                     }
                 }
                 else if(CommInfo.comm_rx_index > UART3_RX_BUFFER_SIZE)
                 {
-                    CommInfo.comm_state = COMM_STATE_IDLE;
-                    CommInfo.comm_rx_index = 0;
+                    SetCommState(COMM_STATE_IDLE);
+                    SetCommRxIndex(0);
                 }
                 break;
         }

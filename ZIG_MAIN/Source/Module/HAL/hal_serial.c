@@ -1,6 +1,6 @@
 /**
  * File : hal_serial.c
- * 
+ *
  * Hardware Abstraction Layer
  * Depend on Renesas MCU Chip
 */
@@ -10,7 +10,7 @@
 #pragma interrupt INTSR0 HAL_Uart0_interrupt_receive
 #endif
 
-#if 0
+#if 1
 #pragma interrupt INTST3 HAL_Uart3_interrupt_send
 #pragma interrupt INTSR3 HAL_Uart3_interrupt_receive
 #endif
@@ -80,7 +80,7 @@ __interrupt static void HAL_Uart0_interrupt_send(void)
     {
         //ERROR
     }
-    
+
     rx_data = UART0_GET_RX_DATA();
 
     if (uart0_rx_callback_func != NULL)
@@ -119,7 +119,7 @@ __interrupt static void HAL_Uart3_interrupt_receive(void)
     {
         //ERROR
     }
-    
+
     rx_data = UART3_GET_RX_DATA();
 
     if (uart3_rx_callback_func != NULL)

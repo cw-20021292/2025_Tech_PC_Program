@@ -12,7 +12,7 @@
 #include    "M8_Ice_making.h"
 #include    "Temp_Table.h"
 #include    "Ice_Make_Time_Table.h"
-
+#include    "App_Comm_Protocol.h"
 
 void Ice_Make_Process(void);
 void normal_mode_ice_init_operation(void);
@@ -452,7 +452,15 @@ void ice_make_operation(void)
             }
             else
             {
-                gu16_Ice_Tray_Fill_Hz = C_ICE_TRAY_FILL_200CC;
+                if(GetB2TrayIn_Hz() > 0)
+                {
+                    gu16_Ice_Tray_Fill_Hz = GetB2TrayIn_Hz();
+                }
+                else
+                {
+                    gu16_Ice_Tray_Fill_Hz = C_ICE_TRAY_FILL_200CC;
+                }
+
                 gu8IceStep = STATE_20_WATER_IN_ICE_TRAY;
             }
             #endif
@@ -831,6 +839,11 @@ U8 get_ice_mode_comp_rps(void)
     {
         /*..hui [23-4-7???? 11:16:14] 30?? ???..*/
         mu8_return = BLDC_COMP_65Hz;
+    }
+
+    if(GetB2IceMakeTargetRPS() > 0)
+    {
+        mu8_return = GetB2IceMakeTargetRPS();
     }
 
     return mu8_return;

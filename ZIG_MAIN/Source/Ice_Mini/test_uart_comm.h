@@ -65,7 +65,6 @@ typedef enum
 typedef enum
 {
     PROTOCOL_B3_CMD = 0xB3,
-    PROTOCOL_B3_LENGTH = 0,
 } PROTOCOL_B3_FREEZING_TABLE;
 
 #endif

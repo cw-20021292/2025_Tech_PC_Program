@@ -276,11 +276,11 @@ class RefrigerationSystem:
                 self.log_communication(f"  트레이 위치: {self.temp_data['cur_tray_position']} ({tray_position})", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
-                # CMD 0xB4 패킷 전송
-                success, message = self.comm.send_packet(0xB4, bytes(data_field))
+                # CMD 0xB4 패킷 전송 (우선순위, 응답을 받을 때까지 재전송)
+                success, message = self.comm.send_packet(0xB4, bytes(data_field), priority=True, retry_until_response=True)
                 
                 if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB4, 4바이트)", "green")
+                    self.log_communication(f"  전송 요청 성공 (CMD 0xB4, 4바이트, 우선순위 큐 추가됨)", "green")
                     
                     # 입력 모드 비활성화
                     self.edit_mode = False
@@ -339,7 +339,7 @@ class RefrigerationSystem:
         if 'target_temp' in self.labels and not self.edit_mode:
             widget = self.labels['target_temp']
             current_value = widget.get()
-            new_value = str(self.data.get('target_temp', 0))
+            new_value = str(self.data.get('target_temp', 0) * 10)
             if current_value != new_value:
                 widget.config(state='normal')
                 widget.delete(0, tk.END)
@@ -350,7 +350,7 @@ class RefrigerationSystem:
         if 'target_first_temp' in self.labels and not self.edit_mode:
             widget = self.labels['target_first_temp']
             current_value = widget.get()
-            new_value = str(self.data.get('target_first_temp', 0))
+            new_value = str(self.data.get('target_first_temp', 0) * 10)
             if current_value != new_value:
                 widget.config(state='normal')
                 widget.delete(0, tk.END)

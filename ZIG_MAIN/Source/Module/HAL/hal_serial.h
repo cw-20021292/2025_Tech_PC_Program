@@ -1,6 +1,6 @@
 /**
  * File : hal_serial.h
- * 
+ *
  * Hardware Abstraction Layer
  * Depend on Renesas MCU Chip
 */
@@ -10,7 +10,7 @@
 #include "macrodriver.h"
 
 //#define USE_UART0_MODULE
-//#define USE_UART3_MODULE
+#define USE_UART3_MODULE
 
 #define UART0_GET_SERIAL_STATUS()           (U8)(SSR01 & 0x0007U)
 #define UART0_CLEAR_ERROR_FLAG(errType)      do{ SIR01 = (U16)errType; }while(0);

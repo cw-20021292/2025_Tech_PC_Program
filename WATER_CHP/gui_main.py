@@ -363,13 +363,22 @@ class MainGUI:
         cooling_frame.columnconfigure(0, weight=1)
     
     def validate_number(self, value):
-        """숫자와 소숫점 입력 가능하도록 검증"""
+        """숫자와 소숫점 입력 가능하도록 검증 (소숫점 첫째 자리만 허용)"""
         if value == "":
             return True
         try:
             # 소숫점이 2개 이상이면 안됨
             if value.count('.') > 1:
                 return False
+            # 소숫점이 있으면 소수 부분이 첫째 자리(1자리)까지만 허용
+            if '.' in value:
+                parts = value.split('.')
+                if len(parts) != 2:
+                    return False
+                # 소수 부분(parts[1])이 1자리를 초과하면 안됨
+                decimal_part = parts[1]
+                if len(decimal_part) > 1:
+                    return False
             float(value)
             return True
         except ValueError:
@@ -483,50 +492,75 @@ class MainGUI:
                 # 입력 값 가져오기
                 target_rps_str = self.cooling_labels['target_rps'].get()
                 on_temp_str = self.cooling_labels['on_temp'].get()
+                off_temp_str = self.cooling_labels['off_temp'].get()
+                additional_time_str = self.cooling_labels['cooling_additional_time'].get()
                 
                 # 빈 값 체크
-                if not target_rps_str or not on_temp_str:
+                if not target_rps_str or not on_temp_str or not off_temp_str or not additional_time_str:
                     messagebox.showwarning("경고", "모든 값을 입력해주세요.")
                     return
                 
+                # 온도 값 처리 (소숫점 첫째 자리만 허용, 10을 곱해서 정수로 변환)
+                on_temp_float = float(on_temp_str)
+                off_temp_float = float(off_temp_str)
+                on_temp_int = int(on_temp_float * 10)  # 5.5 → 55
+                off_temp_int = int(off_temp_float * 10)  # 25.5 → 255
+                
                 # 정수로 변환
                 target_rps = int(float(target_rps_str))
-                on_temp = int(float(on_temp_str))
-                cooling_operation = 1 if self.cooling_data['operation_state'] == 'GOING' else 0
+                additional_time = int(float(additional_time_str))
                 
                 # 범위 체크
                 if not (constants.RPS_MIN <= target_rps <= constants.RPS_MAX):
                     messagebox.showwarning("경고", f"목표 RPS는 {constants.RPS_MIN}~{constants.RPS_MAX} 범위여야 합니다.")
                     return
                 
-                if not (-127 <= on_temp <= 127):
-                    messagebox.showwarning("경고", "냉각 ON 온도는 -127~127℃ 범위여야 합니다.")
+                # 온도 범위 체크 (unsigned char: 0~255, 10을 곱한 값이 0~255 범위여야 함)
+                # 온도는 0.0~25.5℃ 범위 (10을 곱하면 0~255)
+                if not (0.0 <= on_temp_float <= 25.5):
+                    messagebox.showwarning("경고", "냉각 ON 온도는 0.0~25.5℃ 범위여야 합니다.")
                     return
                 
-                # TARGET TEMP는 on_temp를 사용 (임시)
-                target_temp = on_temp
+                if not (0.0 <= off_temp_float <= 25.5):
+                    messagebox.showwarning("경고", "냉각 OFF 온도는 0.0~25.5℃ 범위여야 합니다.")
+                    return
                 
-                # DATA FIELD 구성 (4바이트 - 새로운 프로토콜)
-                data_field = bytearray(4)
-                data_field[0] = target_rps  # TARGET RPS
-                data_field[1] = self.comm.protocol.int_to_signed_byte(target_temp)  # TARGET TEMP (signed byte)
-                data_field[2] = cooling_operation  # 냉각 동작 (0: STOP, 1: GOING)
-                data_field[3] = self.comm.protocol.int_to_signed_byte(on_temp)  # 냉각 ON 온도 (signed byte)
+                # unsigned char 범위 체크 (0~255)
+                if not (0 <= on_temp_int <= 255):
+                    messagebox.showwarning("경고", "냉각 ON 온도 값이 범위를 벗어났습니다 (0~255).")
+                    return
+                
+                if not (0 <= off_temp_int <= 255):
+                    messagebox.showwarning("경고", "냉각 OFF 온도 값이 범위를 벗어났습니다 (0~255).")
+                    return
+                
+                # 추가시간 범위 체크 (0 ~ 65535)
+                if not (0 <= additional_time <= 65535):
+                    messagebox.showwarning("경고", "추가시간은 0~65535초 범위여야 합니다.")
+                    return
+                
+                # DATA FIELD 구성 (5바이트)
+                data_field = bytearray(5)
+                data_field[0] = target_rps  # DATA 1: Target RPS
+                data_field[1] = on_temp_int & 0xFF  # DATA 2: 냉각 ON 온도 (unsigned char, 10을 곱한 값)
+                data_field[2] = off_temp_int & 0xFF  # DATA 3: 냉각 OFF 온도 (unsigned char, 10을 곱한 값)
+                data_field[3] = (additional_time >> 8) & 0xFF  # DATA 4: 추가시간 High값
+                data_field[4] = additional_time & 0xFF  # DATA 5: 추가시간 Low값
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[냉각 제어] CMD 0xB1 전송 (4바이트)", "blue")
+                self.log_communication(f"[냉각 제어] CMD 0xB1 전송 (5바이트)", "blue")
                 self.log_communication(f"  목표 RPS: {target_rps}", "gray")
-                self.log_communication(f"  목표 온도: {target_temp}℃", "gray")
-                self.log_communication(f"  냉각 동작: {'GOING' if cooling_operation == 1 else 'STOP'}", "gray")
-                self.log_communication(f"  냉각 ON 온도: {on_temp}℃", "gray")
+                self.log_communication(f"  냉각 ON 온도: {on_temp_float}℃ (전송값: {on_temp_int})", "gray")
+                self.log_communication(f"  냉각 OFF 온도: {off_temp_float}℃ (전송값: {off_temp_int})", "gray")
+                self.log_communication(f"  추가시간: {additional_time}초", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
-                # CMD 0xB1 패킷 전송
-                success, message = self.comm.send_packet(0xB1, bytes(data_field))
+                # CMD 0xB1 패킷 전송 (우선순위, 응답을 받을 때까지 재전송)
+                success, message = self.comm.send_packet(0xB1, bytes(data_field), priority=True, retry_until_response=True)
                 
                 if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB1, 4바이트)", "green")
+                    self.log_communication(f"  전송 요청 성공 (CMD 0xB1, 5바이트, 우선순위 큐 추가됨)", "green")
                     
                     # 입력 모드 비활성화
                     self.cooling_edit_mode = False
@@ -569,9 +603,10 @@ class MainGUI:
             self.icemaking_temp_data['swing_on_time'] = self.icemaking_data['swing_on_time']
             self.icemaking_temp_data['swing_off_time'] = self.icemaking_data['swing_off_time']
             
-            # Entry 위젯들을 편집 가능하게 설정
+            # Entry 위젯들을 편집 가능하게 설정 (목표 RPS, 입수용량, 스윙바 ON/OFF 입력 가능)
             self.icemaking_labels['target_rps'].config(state='normal', bg='lightyellow')
-            self.icemaking_labels['icemaking_time'].config(state='normal', bg='lightyellow')
+            # 제빙시간은 입력 불가능 (현재 값 유지)
+            # self.icemaking_labels['icemaking_time'].config(state='normal', bg='lightyellow')  # 입력 불가능
             self.icemaking_labels['water_capacity'].config(state='normal', bg='lightyellow')
             self.icemaking_labels['swing_on_time'].config(state='normal', bg='lightyellow')
             self.icemaking_labels['swing_off_time'].config(state='normal', bg='lightyellow')
@@ -579,6 +614,12 @@ class MainGUI:
             # Entry 위젯에 현재 값 설정
             self.icemaking_labels['target_rps'].delete(0, tk.END)
             self.icemaking_labels['target_rps'].insert(0, str(self.icemaking_temp_data['target_rps']))
+            self.icemaking_labels['water_capacity'].delete(0, tk.END)
+            self.icemaking_labels['water_capacity'].insert(0, str(self.icemaking_temp_data['water_capacity']))
+            self.icemaking_labels['swing_on_time'].delete(0, tk.END)
+            self.icemaking_labels['swing_on_time'].insert(0, str(self.icemaking_temp_data['swing_on_time']))
+            self.icemaking_labels['swing_off_time'].delete(0, tk.END)
+            self.icemaking_labels['swing_off_time'].insert(0, str(self.icemaking_temp_data['swing_off_time']))
             
             # 제빙 동작 라벨 UI 업데이트
             if self.icemaking_temp_data['operation'] == '동작':
@@ -594,21 +635,22 @@ class MainGUI:
         else:
             # ========== 입력 모드 비활성화 및 데이터 전송 ==========
             try:
-                # 입력 값 가져오기
+                # 입력 값 가져오기 (목표 RPS, 입수용량, 스윙바 ON/OFF 입력 가능)
                 target_rps_str = self.icemaking_labels['target_rps'].get()
-                icemaking_time_str = self.icemaking_labels['icemaking_time'].get()
                 water_capacity_str = self.icemaking_labels['water_capacity'].get()
                 swing_on_str = self.icemaking_labels['swing_on_time'].get()
                 swing_off_str = self.icemaking_labels['swing_off_time'].get()
                 
-                # 빈 값 체크
-                if not target_rps_str or not icemaking_time_str or not water_capacity_str or not swing_on_str or not swing_off_str:
-                    messagebox.showwarning("경고", "모든 값을 입력해주세요.")
+                # 제빙시간은 현재 데이터에서 가져오기 (입력 불가능)
+                icemaking_time = self.icemaking_data.get('icemaking_time', 0)
+                
+                # 빈 값 체크 (입력 가능한 필드만)
+                if not target_rps_str or not water_capacity_str or not swing_on_str or not swing_off_str:
+                    messagebox.showwarning("경고", "목표 RPS, 입수용량, 스윙바 ON/OFF 시간을 모두 입력해주세요.")
                     return
                 
                 # 정수로 변환
                 target_rps = int(float(target_rps_str))
-                icemaking_time = int(float(icemaking_time_str))  # ms 단위
                 water_capacity = int(float(water_capacity_str))  # Hz 단위
                 swing_on = int(float(swing_on_str))              # ms 단위
                 swing_off = int(float(swing_off_str))            # ms 단위
@@ -616,11 +658,6 @@ class MainGUI:
                 # 범위 체크
                 if not (constants.RPS_MIN <= target_rps <= constants.RPS_MAX):
                     messagebox.showwarning("경고", f"목표 RPS는 {constants.RPS_MIN}~{constants.RPS_MAX} 범위여야 합니다.")
-                    return
-                
-                # 범위 체크
-                if not (0 <= icemaking_time <= 65535):
-                    messagebox.showwarning("경고", "제빙시간은 0~65535ms 범위여야 합니다.")
                     return
                 
                 if not (0 <= water_capacity <= 65535):
@@ -635,55 +672,41 @@ class MainGUI:
                     messagebox.showwarning("경고", "스윙바 OFF 시간은 0~255ms 범위여야 합니다.")
                     return
                 
-                # TARGET TEMP 가져오기 (기본값 사용)
-                target_temp = self.icemaking_data.get('target_temp', 0)
-                icemaking_operation = 1 if self.icemaking_temp_data['operation'] == '동작' else 0
-                
-                # 범위 체크
-                if not (-127 <= target_temp <= 127):
-                    messagebox.showwarning("경고", "목표 온도는 -127~127℃ 범위여야 합니다.")
-                    return
-                
                 # 임시 저장소의 값을 실제 데이터로 복사
-                self.icemaking_data['operation'] = self.icemaking_temp_data['operation']
                 self.icemaking_data['target_rps'] = target_rps
-                self.icemaking_data['icemaking_time'] = icemaking_time
                 self.icemaking_data['water_capacity'] = water_capacity
                 self.icemaking_data['swing_on_time'] = swing_on
                 self.icemaking_data['swing_off_time'] = swing_off
                 
-                # DATA FIELD 구성 (7바이트)
-                data_field = bytearray(7)
-                data_field[0] = target_rps  # TARGET RPS
-                data_field[1] = self.comm.protocol.int_to_signed_byte(target_temp)  # TARGET TEMP (signed byte)
-                data_field[2] = icemaking_operation  # 제빙 동작 (0: 대기, 1: 동작)
-                data_field[3] = (icemaking_time >> 8) & 0xFF  # 제빙시간(ms) 상위 1B
-                data_field[4] = icemaking_time & 0xFF  # 제빙시간(ms) 하위 1B
-                data_field[5] = (water_capacity >> 8) & 0xFF  # 입수용량(Hz) 상위 1BYTE
-                data_field[6] = water_capacity & 0xFF  # 입수용량(Hz) 하위 1BYTE
+                # DATA FIELD 구성 (5바이트)
+                data_field = bytearray(5)
+                data_field[0] = target_rps  # DATA 1: TARGET RPS
+                data_field[1] = (water_capacity >> 8) & 0xFF  # DATA 2: 입수용량 HIGH
+                data_field[2] = water_capacity & 0xFF  # DATA 3: 입수용량 LOW
+                data_field[3] = swing_on & 0xFF  # DATA 4: 스윙바 ON 시간
+                data_field[4] = swing_off & 0xFF  # DATA 5: 스윙바 OFF 시간
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[제빙 제어] CMD 0xB2 전송 (7바이트)", "blue")
+                self.log_communication(f"[제빙 제어] CMD 0xB2 전송 (5바이트)", "blue")
                 self.log_communication(f"  목표 RPS: {target_rps}", "gray")
-                self.log_communication(f"  목표 온도: {target_temp}℃", "gray")
-                self.log_communication(f"  제빙 동작: {self.icemaking_temp_data['operation']} (0x{data_field[2]:02X})", "gray")
-                self.log_communication(f"  제빙시간: {icemaking_time}ms", "gray")
-                self.log_communication(f"  입수 용량: {water_capacity}Hz", "gray")
+                self.log_communication(f"  입수 용량: {water_capacity}Hz (HIGH: 0x{data_field[1]:02X}, LOW: 0x{data_field[2]:02X})", "gray")
+                self.log_communication(f"  스윙바 ON: {swing_on}ms", "gray")
+                self.log_communication(f"  스윙바 OFF: {swing_off}ms", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
-                # CMD 0xB2 패킷 전송
-                success, message = self.comm.send_packet(0xB2, bytes(data_field))
+                # CMD 0xB2 패킷 전송 (우선순위, 응답을 받을 때까지 재전송)
+                success, message = self.comm.send_packet(0xB2, bytes(data_field), priority=True, retry_until_response=True)
                 
                 if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB2, 7바이트)", "green")
+                    self.log_communication(f"  전송 요청 성공 (CMD 0xB2, 5바이트, 우선순위 큐 추가됨)", "green")
                     
                     # 입력 모드 비활성화
                     self.icemaking_edit_mode = False
                     
                     # Entry 위젯들을 읽기 전용으로 설정
                     self.icemaking_labels['target_rps'].config(state='readonly', bg='white')
-                    self.icemaking_labels['icemaking_time'].config(state='readonly', bg='white')
+                    # 제빙시간은 이미 읽기 전용
                     self.icemaking_labels['water_capacity'].config(state='readonly', bg='white')
                     self.icemaking_labels['swing_on_time'].config(state='readonly', bg='white')
                     self.icemaking_labels['swing_off_time'].config(state='readonly', bg='white')
@@ -1825,38 +1848,48 @@ class MainGUI:
                     self.log_communication(log_msg, "green")
             
             # CMD별 데이터 처리
-            if cmd in [0xB1, 0xB2, 0xB3, 0xC0]:
+            if cmd in [0xB1, 0xB2, 0xB3, 0xB4, 0xC0]:
                 # CMD 0xB1 수신 처리 (냉각 제어 응답)
-                if cmd == 0xB1 and len(data_field) >= 4:
-                    target_rps = data_field[0]  # TARGET RPS
-                    target_temp = self.comm.protocol.signed_byte_to_int(data_field[1])  # TARGET TEMP (signed byte)
-                    cooling_operation = data_field[2]  # 냉각 동작 (0: STOP, 1: GOING)
-                    on_temp = self.comm.protocol.signed_byte_to_int(data_field[3])  # 냉각 ON 온도 (signed byte)
+                if cmd == 0xB1 and len(data_field) >= 5:
+                    # 응답을 받았으므로 재전송 중지
+                    self.comm.stop_b1_retry()
+                    
+                    target_rps = data_field[0]  # DATA 1: Target RPS
+                    on_temp_int = data_field[1]  # DATA 2: 냉각 ON 온도 (unsigned char, 10을 곱한 값)
+                    off_temp_int = data_field[2]  # DATA 3: 냉각 OFF 온도 (unsigned char, 10을 곱한 값)
+                    additional_time = (data_field[3] << 8) | data_field[4]  # DATA 4-5: 추가시간 (2바이트)
+                    
+                    # 온도 값을 10으로 나눠서 실제 온도로 변환
+                    on_temp = on_temp_int / 10.0
+                    off_temp = off_temp_int / 10.0
                     
                     cooling_data = {
                         'target_rps': target_rps,
-                        'operation_state': 'GOING' if cooling_operation == 1 else 'STOP',
-                        'on_temp': on_temp
+                        'on_temp': on_temp,
+                        'off_temp': off_temp,
+                        'cooling_additional_time': additional_time
                     }
                     self.cooling_system.update_data(cooling_data)
                     
                     if self.debug_comm:
                         self.log_communication(f"  냉각 데이터 수신: 목표 RPS={target_rps}, "
-                                            f"목표 온도={target_temp}℃, "
-                                            f"동작={'GOING' if cooling_operation == 1 else 'STOP'}, "
-                                            f"ON 온도={on_temp}℃", "gray")
+                                            f"ON 온도={on_temp}℃, "
+                                            f"OFF 온도={off_temp}℃, "
+                                            f"추가시간={additional_time}초", "gray")
+                        self.log_communication(f"  CMD 0xB1 응답 수신 - 재전송 중지됨", "green")
                 
                 # CMD 0xB2 수신 처리 (제빙 제어 응답)
-                if cmd == 0xB2 and len(data_field) >= 7:
-                    operation = data_field[0]  # 0=대기, 1=동작
-                    icemaking_time = (data_field[1] << 8) | data_field[2]  # 2바이트 (ms)
-                    water_capacity = (data_field[3] << 8) | data_field[4]  # 2바이트 (Hz)
-                    swing_on = data_field[5]   # 1바이트 (ms)
-                    swing_off = data_field[6]  # 1바이트 (ms)
+                if cmd == 0xB2 and len(data_field) >= 5:
+                    # 응답을 받았으므로 재전송 중지
+                    self.comm.stop_b2_retry()
+                    
+                    target_rps = data_field[0]  # DATA 1: TARGET RPS
+                    water_capacity = (data_field[1] << 8) | data_field[2]  # DATA 2-3: 입수용량 (2바이트)
+                    swing_on = data_field[3]   # DATA 4: 스윙바 ON 시간
+                    swing_off = data_field[4]  # DATA 5: 스윙바 OFF 시간
                     
                     icemaking_data = {
-                        'operation': '동작' if operation == 1 else '대기',
-                        'icemaking_time': icemaking_time,
+                        'target_rps': target_rps,
                         'water_capacity': water_capacity,
                         'swing_on_time': swing_on,
                         'swing_off_time': swing_off
@@ -1864,9 +1897,48 @@ class MainGUI:
                     self.icemaking_system.update_data(icemaking_data)
                     
                     if self.debug_comm:
-                        self.log_communication(f"  제빙 데이터 수신: 동작={icemaking_data['operation']}, "
-                                            f"시간={icemaking_time}ms, 용량={water_capacity}Hz, "
+                        self.log_communication(f"  제빙 데이터 수신: 목표 RPS={target_rps}, "
+                                            f"용량={water_capacity}Hz, "
                                             f"스윙 ON={swing_on}ms, OFF={swing_off}ms", "gray")
+                        self.log_communication(f"  CMD 0xB2 응답 수신 - 재전송 중지됨", "green")
+                
+                # CMD 0xB4 수신 처리 (보냉 제어 응답)
+                if cmd == 0xB4 and len(data_field) >= 4:
+                    # 응답을 받았으므로 재전송 중지
+                    self.comm.stop_b4_retry()
+                    
+                    target_rps = data_field[0]  # DATA 1: TARGET RPS (unsigned char)
+                    
+                    # DATA 2: TARGET TEMP (unsigned char, 최상위 비트가 1이면 음수, 0이면 양수)
+                    target_temp_byte = data_field[1]  # unsigned char
+                    if target_temp_byte & 0x80:  # 최상위 비트가 1이면 음수
+                        target_temp = -(target_temp_byte & 0x7F)  # 하위 7비트의 절대값에 음수 부호
+                    else:  # 최상위 비트가 0이면 양수
+                        target_temp = target_temp_byte  # 그대로 사용
+                    
+                    # DATA 3: FIRST TARGET TEMP (unsigned char, 최상위 비트가 1이면 음수, 0이면 양수)
+                    target_first_temp_byte = data_field[2]  # unsigned char
+                    if target_first_temp_byte & 0x80:  # 최상위 비트가 1이면 음수
+                        target_first_temp = -(target_first_temp_byte & 0x7F)  # 하위 7비트의 절대값에 음수 부호
+                    else:  # 최상위 비트가 0이면 양수
+                        target_first_temp = target_first_temp_byte  # 그대로 사용
+                    
+                    tray_position = data_field[3]  # DATA 4: TARGET TRAY POSITION (unsigned char)
+                    
+                    refrigeration_data = {
+                        'target_rps': target_rps,
+                        'target_temp': target_temp,
+                        'target_first_temp': target_first_temp,
+                        'cur_tray_position': tray_position
+                    }
+                    self.refrigeration_system.update_data(refrigeration_data)
+                    
+                    if self.debug_comm:
+                        self.log_communication(f"  보냉 데이터 수신: 목표 RPS={target_rps}, "
+                                            f"목표 온도={target_temp}℃, "
+                                            f"첫 온도={target_first_temp}℃, "
+                                            f"트레이 위치={tray_position}", "gray")
+                        self.log_communication(f"  CMD 0xB4 응답 수신 - 재전송 중지됨", "green")
                 
                 try:
                     data_string = data_field.decode('utf-8', errors='ignore')

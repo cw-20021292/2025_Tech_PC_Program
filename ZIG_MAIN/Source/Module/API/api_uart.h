@@ -1,6 +1,6 @@
 /**
  * File : api_uart.h
- * 
+ *
  * Application Programming Interface
  * Depend on HAL
 */
@@ -13,7 +13,7 @@
 #define UART0_RX_BUFFER_SIZE    128
 #define UART0_TX_BUFFER_SIZE    128
 
-#define UART3_RX_BUFFER_SIZE    20
+#define UART3_RX_BUFFER_SIZE    256
 #define UART3_TX_BUFFER_SIZE    256
 
 void Uart_Init(void);

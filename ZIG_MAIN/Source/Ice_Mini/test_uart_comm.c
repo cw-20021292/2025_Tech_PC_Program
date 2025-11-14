@@ -546,7 +546,7 @@ void AT_UART_Tx_Process(void)
     // CRC 계산 범위: STX부터 DATA 끝까지 (CRC와 ETX 제외)
     // 패킷 구조: STX(1) + ID(1) + CMD(1) + LEN(1) + DATA(N) + CRC_HIGH(1) + CRC_LOW(1) + ETX(1)
     // CRC 계산: STX부터 DATA 끝까지 = 4 + mu8_data_length
-    mu16_cal_crc = Rx_CRC_CCITT(Comm.u8TxData, (U8)(4 + mu8_data_length));
+    mu16_cal_crc = CRC_Cal(Comm.u8TxData, (U8)(4 + mu8_data_length));
     Comm.u8TxData[4 + mu8_data_length] = (U8)HighByte(mu16_cal_crc);
     Comm.u8TxData[4 + mu8_data_length + 1] = (U8)LowByte(mu16_cal_crc);
     Comm.u8TxData[4 + mu8_data_length + 2] = WORK_ETX;
@@ -646,7 +646,7 @@ void int_UART3_WORK_RX(void)
                     u16RxDataDebug = (Comm.u8RxData[3] + WORK_PACKET_BASIC_LENGTH);
                     if(Comm.u8RxCounter == (Comm.u8RxData[3] + WORK_PACKET_BASIC_LENGTH))
                     {
-                        mu16_cal_crc = Rx_CRC_CCITT(Comm.u8RxData, (Comm.u8RxCounter-3));
+                        mu16_cal_crc = CRC_Cal(Comm.u8RxData, (Comm.u8RxCounter-3));
 
                         // CRC_HIGH와 CRC_LOW 비교
                         if(Comm.u8RxData[Comm.u8RxCounter-3] == (U8)HighByte(mu16_cal_crc)

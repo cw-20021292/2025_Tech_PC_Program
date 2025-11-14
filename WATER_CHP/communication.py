@@ -28,8 +28,8 @@ class ProtocolHandler:
     CMD_LENGTH_MAP = {
         0xF0: 0,   # 공통 상태조회 (PC → MAIN: 0바이트, MAIN → PC: 40바이트)
         0xF1: 0,   # 냉동상태조회 (PC → MAIN: 0바이트, MAIN → PC: 76바이트)
-        0xB1: 4,   # 냉각운전 변경 (TARGET RPS, TARGET TEMP, 냉각 동작, 냉각 ON 온도)
-        0xB2: 7,   # 제빙운전 변경 (TARGET RPS, TARGET TEMP, 제빙 동작, 제빙시간, 입수용량)
+        0xB1: 5,   # 냉각운전 변경 (TARGET RPS, 냉각 ON 온도, 냉각 OFF 온도, 추가시간 High, 추가시간 Low)
+        0xB2: 5,   # 제빙운전 변경 (TARGET RPS, 입수용량 HIGH, 입수용량 LOW, 스윙바 ON, 스윙바 OFF)
         0xB3: 93,  # 제빙테이블 적용 (DATA1: 행인덱스 1바이트, DATA2~93: 테이블 46개x2바이트)
         0xB4: 4,   # 보냉운전 변경 (TARGET RPS, TARGET TEMP, TARGET TEMP FIRST, TRAY POSITION)
         0xC0: 7    # 센서값 변경
@@ -340,6 +340,7 @@ class SerialCommunication:
         # 데이터 큐들
         self.receive_queue = queue.Queue()
         self.send_queue = queue.Queue()
+        self.priority_send_queue = queue.Queue()  # 우선순위 전송 큐
         self.status_queue = queue.Queue()
         
         # 연결 정보
@@ -353,6 +354,30 @@ class SerialCommunication:
         self.heartbeat_interval = 0.2  # 200ms
         self.heartbeat_active = False
         self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
+        
+        # CMD 0xB1 재전송 설정
+        self.b1_retry_active = False
+        self.b1_retry_packet = None
+        self.b1_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b1_retry_thread = None
+        self.b1_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b1_retry_start_time = None
+        
+        # CMD 0xB2 재전송 설정
+        self.b2_retry_active = False
+        self.b2_retry_packet = None
+        self.b2_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b2_retry_thread = None
+        self.b2_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b2_retry_start_time = None
+        
+        # CMD 0xB4 재전송 설정
+        self.b4_retry_active = False
+        self.b4_retry_packet = None
+        self.b4_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b4_retry_thread = None
+        self.b4_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b4_retry_start_time = None
     
     def get_available_ports(self):
         """사용 가능한 시리얼 포트 목록 반환"""
@@ -436,6 +461,11 @@ class SerialCommunication:
             # Heartbeat 중지
             self.stop_heartbeat()
             
+            # CMD 0xB1, 0xB2, 0xB4 재전송 중지
+            self.stop_b1_retry()
+            self.stop_b2_retry()
+            self.stop_b4_retry()
+            
             if self.serial_connection and self.serial_connection.is_open:
                 self.serial_connection.close()
             
@@ -491,8 +521,16 @@ class SerialCommunication:
                     self.status_queue.put(('ERROR', f"상태조회 전송 오류: {str(e)}"))
                 break
     
-    def send_packet(self, cmd, data_field=None, tx_id=None):
-        """프로토콜 패킷 전송 (RX ID 제거)"""
+    def send_packet(self, cmd, data_field=None, tx_id=None, priority=False, retry_until_response=False):
+        """프로토콜 패킷 전송 (RX ID 제거)
+        
+        Args:
+            cmd: CMD 값
+            data_field: 데이터 필드 (bytes 또는 None)
+            tx_id: TX ID (기본값: PC_ID)
+            priority: 우선순위 전송 여부 (True: 우선순위 큐, False: 일반 큐)
+            retry_until_response: 응답을 받을 때까지 재전송 여부 (True: 재전송, False: 한 번만 전송)
+        """
         if not self.is_connected:
             return False, "연결되지 않음"
         
@@ -511,11 +549,154 @@ class SerialCommunication:
             if packet[-1] != self.protocol.ETX:
                 return False, f"패킷 끝이 ETX(0x{self.protocol.ETX:02X})가 아닙니다: 0x{packet[-1]:02X}"
             
-            # 전송 대기열에 추가
-            self.send_queue.put(packet)
-            return True, "패킷 전송 대기열 추가"
+            # 우선순위에 따라 적절한 큐에 추가
+            if priority:
+                self.priority_send_queue.put(packet)
+                result_msg = "패킷 우선순위 전송 대기열 추가"
+            else:
+                self.send_queue.put(packet)
+                result_msg = "패킷 전송 대기열 추가"
+            
+            # CMD 0xB1, 0xB2, 0xB4이고 재전송 옵션이 활성화된 경우 재전송 시작
+            if cmd == 0xB1 and retry_until_response:
+                self.start_b1_retry(packet)
+            elif cmd == 0xB2 and retry_until_response:
+                self.start_b2_retry(packet)
+            elif cmd == 0xB4 and retry_until_response:
+                self.start_b4_retry(packet)
+            
+            return True, result_msg
         except Exception as e:
             return False, f"패킷 생성 오류: {str(e)}"
+    
+    def start_b1_retry(self, packet):
+        """CMD 0xB1 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b1_retry()
+        
+        self.b1_retry_active = True
+        self.b1_retry_packet = packet
+        self.b1_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b1_retry_thread = threading.Thread(target=self._b1_retry_worker, daemon=True)
+        self.b1_retry_thread.start()
+    
+    def stop_b1_retry(self):
+        """CMD 0xB1 재전송 중지"""
+        self.b1_retry_active = False
+        self.b1_retry_packet = None
+        self.b1_retry_start_time = None
+    
+    def _b1_retry_worker(self):
+        """CMD 0xB1 재전송 작업자 스레드"""
+        while self.b1_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b1_retry_start_time is not None:
+                    elapsed = time.time() - self.b1_retry_start_time
+                    if elapsed >= self.b1_retry_timeout:
+                        self.b1_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB1 재전송 타임아웃 ({self.b1_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b1_retry_packet:
+                    self.priority_send_queue.put(self.b1_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b1_retry_interval)
+                
+            except Exception as e:
+                if self.b1_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB1 재전송 오류: {str(e)}"))
+                break
+    
+    def start_b2_retry(self, packet):
+        """CMD 0xB2 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b2_retry()
+        
+        self.b2_retry_active = True
+        self.b2_retry_packet = packet
+        self.b2_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b2_retry_thread = threading.Thread(target=self._b2_retry_worker, daemon=True)
+        self.b2_retry_thread.start()
+    
+    def stop_b2_retry(self):
+        """CMD 0xB2 재전송 중지"""
+        self.b2_retry_active = False
+        self.b2_retry_packet = None
+        self.b2_retry_start_time = None
+    
+    def _b2_retry_worker(self):
+        """CMD 0xB2 재전송 작업자 스레드"""
+        while self.b2_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b2_retry_start_time is not None:
+                    elapsed = time.time() - self.b2_retry_start_time
+                    if elapsed >= self.b2_retry_timeout:
+                        self.b2_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB2 재전송 타임아웃 ({self.b2_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b2_retry_packet:
+                    self.priority_send_queue.put(self.b2_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b2_retry_interval)
+                
+            except Exception as e:
+                if self.b2_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB2 재전송 오류: {str(e)}"))
+                break
+    
+    def start_b4_retry(self, packet):
+        """CMD 0xB4 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b4_retry()
+        
+        self.b4_retry_active = True
+        self.b4_retry_packet = packet
+        self.b4_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b4_retry_thread = threading.Thread(target=self._b4_retry_worker, daemon=True)
+        self.b4_retry_thread.start()
+    
+    def stop_b4_retry(self):
+        """CMD 0xB4 재전송 중지"""
+        self.b4_retry_active = False
+        self.b4_retry_packet = None
+        self.b4_retry_start_time = None
+    
+    def _b4_retry_worker(self):
+        """CMD 0xB4 재전송 작업자 스레드"""
+        while self.b4_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b4_retry_start_time is not None:
+                    elapsed = time.time() - self.b4_retry_start_time
+                    if elapsed >= self.b4_retry_timeout:
+                        self.b4_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB4 재전송 타임아웃 ({self.b4_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b4_retry_packet:
+                    self.priority_send_queue.put(self.b4_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b4_retry_interval)
+                
+            except Exception as e:
+                if self.b4_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB4 재전송 오류: {str(e)}"))
+                break
     
     def _receive_worker(self):
         """데이터 수신 스레드"""
@@ -547,12 +728,25 @@ class SerialCommunication:
                 break
     
     def _send_worker(self):
-        """데이터 송신 스레드"""
+        """데이터 송신 스레드 (우선순위 큐를 먼저 처리)"""
         while not self.stop_thread and self.is_connected:
             try:
-                data = self.send_queue.get(timeout=0.1)
+                data = None
                 
-                if self.serial_connection and self.serial_connection.is_open:
+                # 우선순위 큐를 먼저 확인 (non-blocking)
+                try:
+                    data = self.priority_send_queue.get_nowait()
+                except queue.Empty:
+                    # 우선순위 큐가 비어있으면 일반 큐에서 가져오기 (짧은 timeout으로 우선순위 큐를 자주 확인)
+                    try:
+                        data = self.send_queue.get(timeout=0.01)  # timeout을 0.01초로 줄여서 우선순위 큐를 자주 확인
+                    except queue.Empty:
+                        # 둘 다 비어있으면 잠시 대기 후 다시 확인
+                        time.sleep(0.01)
+                        continue
+                
+                # 패킷 전송 처리
+                if data and self.serial_connection and self.serial_connection.is_open:
                     # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
                     if len(data) >= 2:
                         if data[0] != self.protocol.STX:
@@ -804,8 +998,8 @@ class StatusResponseHandler:
                     'target_rps': data_field[27],
                     'icemaking_time': (data_field[28] << 8) | data_field[29],
                     'water_capacity': (data_field[30] << 8) | data_field[31],
-                    'swing_on_time': int(data_field[32] * 100),
-                    'swing_off_time': int(data_field[33] * 100),
+                    'swing_on_time': int(data_field[32]),
+                    'swing_off_time': int(data_field[33]),
                     'tray_position': data_field[34],
                     'ice_jam_state': data_field[35]
                 }
@@ -854,6 +1048,7 @@ class SerialCommunication:
         # 데이터 큐들
         self.receive_queue = queue.Queue()
         self.send_queue = queue.Queue()
+        self.priority_send_queue = queue.Queue()  # 우선순위 전송 큐
         self.status_queue = queue.Queue()
         
         # 연결 정보
@@ -867,6 +1062,30 @@ class SerialCommunication:
         self.heartbeat_interval = 0.2  # 200ms
         self.heartbeat_active = False
         self.heartbeat_paused = False  # Heartbeat 일시 중지 플래그
+        
+        # CMD 0xB1 재전송 설정
+        self.b1_retry_active = False
+        self.b1_retry_packet = None
+        self.b1_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b1_retry_thread = None
+        self.b1_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b1_retry_start_time = None
+        
+        # CMD 0xB2 재전송 설정
+        self.b2_retry_active = False
+        self.b2_retry_packet = None
+        self.b2_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b2_retry_thread = None
+        self.b2_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b2_retry_start_time = None
+        
+        # CMD 0xB4 재전송 설정
+        self.b4_retry_active = False
+        self.b4_retry_packet = None
+        self.b4_retry_interval = 0.2  # 200ms 간격으로 재전송
+        self.b4_retry_thread = None
+        self.b4_retry_timeout = 5.0  # 5초 후 타임아웃
+        self.b4_retry_start_time = None
     
     def get_available_ports(self):
         """사용 가능한 시리얼 포트 목록 반환"""
@@ -950,6 +1169,11 @@ class SerialCommunication:
             # Heartbeat 중지
             self.stop_heartbeat()
             
+            # CMD 0xB1, 0xB2, 0xB4 재전송 중지
+            self.stop_b1_retry()
+            self.stop_b2_retry()
+            self.stop_b4_retry()
+            
             if self.serial_connection and self.serial_connection.is_open:
                 self.serial_connection.close()
             
@@ -1005,8 +1229,16 @@ class SerialCommunication:
                     self.status_queue.put(('ERROR', f"상태조회 전송 오류: {str(e)}"))
                 break
     
-    def send_packet(self, cmd, data_field=None, tx_id=None):
-        """프로토콜 패킷 전송 (RX ID 제거)"""
+    def send_packet(self, cmd, data_field=None, tx_id=None, priority=False, retry_until_response=False):
+        """프로토콜 패킷 전송 (RX ID 제거)
+        
+        Args:
+            cmd: CMD 값
+            data_field: 데이터 필드 (bytes 또는 None)
+            tx_id: TX ID (기본값: PC_ID)
+            priority: 우선순위 전송 여부 (True: 우선순위 큐, False: 일반 큐)
+            retry_until_response: 응답을 받을 때까지 재전송 여부 (True: 재전송, False: 한 번만 전송)
+        """
         if not self.is_connected:
             return False, "연결되지 않음"
         
@@ -1025,11 +1257,154 @@ class SerialCommunication:
             if packet[-1] != self.protocol.ETX:
                 return False, f"패킷 끝이 ETX(0x{self.protocol.ETX:02X})가 아닙니다: 0x{packet[-1]:02X}"
             
-            # 전송 대기열에 추가
-            self.send_queue.put(packet)
-            return True, "패킷 전송 대기열 추가"
+            # 우선순위에 따라 적절한 큐에 추가
+            if priority:
+                self.priority_send_queue.put(packet)
+                result_msg = "패킷 우선순위 전송 대기열 추가"
+            else:
+                self.send_queue.put(packet)
+                result_msg = "패킷 전송 대기열 추가"
+            
+            # CMD 0xB1, 0xB2, 0xB4이고 재전송 옵션이 활성화된 경우 재전송 시작
+            if cmd == 0xB1 and retry_until_response:
+                self.start_b1_retry(packet)
+            elif cmd == 0xB2 and retry_until_response:
+                self.start_b2_retry(packet)
+            elif cmd == 0xB4 and retry_until_response:
+                self.start_b4_retry(packet)
+            
+            return True, result_msg
         except Exception as e:
             return False, f"패킷 생성 오류: {str(e)}"
+    
+    def start_b1_retry(self, packet):
+        """CMD 0xB1 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b1_retry()
+        
+        self.b1_retry_active = True
+        self.b1_retry_packet = packet
+        self.b1_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b1_retry_thread = threading.Thread(target=self._b1_retry_worker, daemon=True)
+        self.b1_retry_thread.start()
+    
+    def stop_b1_retry(self):
+        """CMD 0xB1 재전송 중지"""
+        self.b1_retry_active = False
+        self.b1_retry_packet = None
+        self.b1_retry_start_time = None
+    
+    def _b1_retry_worker(self):
+        """CMD 0xB1 재전송 작업자 스레드"""
+        while self.b1_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b1_retry_start_time is not None:
+                    elapsed = time.time() - self.b1_retry_start_time
+                    if elapsed >= self.b1_retry_timeout:
+                        self.b1_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB1 재전송 타임아웃 ({self.b1_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b1_retry_packet:
+                    self.priority_send_queue.put(self.b1_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b1_retry_interval)
+                
+            except Exception as e:
+                if self.b1_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB1 재전송 오류: {str(e)}"))
+                break
+    
+    def start_b2_retry(self, packet):
+        """CMD 0xB2 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b2_retry()
+        
+        self.b2_retry_active = True
+        self.b2_retry_packet = packet
+        self.b2_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b2_retry_thread = threading.Thread(target=self._b2_retry_worker, daemon=True)
+        self.b2_retry_thread.start()
+    
+    def stop_b2_retry(self):
+        """CMD 0xB2 재전송 중지"""
+        self.b2_retry_active = False
+        self.b2_retry_packet = None
+        self.b2_retry_start_time = None
+    
+    def _b2_retry_worker(self):
+        """CMD 0xB2 재전송 작업자 스레드"""
+        while self.b2_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b2_retry_start_time is not None:
+                    elapsed = time.time() - self.b2_retry_start_time
+                    if elapsed >= self.b2_retry_timeout:
+                        self.b2_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB2 재전송 타임아웃 ({self.b2_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b2_retry_packet:
+                    self.priority_send_queue.put(self.b2_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b2_retry_interval)
+                
+            except Exception as e:
+                if self.b2_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB2 재전송 오류: {str(e)}"))
+                break
+    
+    def start_b4_retry(self, packet):
+        """CMD 0xB4 재전송 시작 (응답을 받을 때까지 재전송)"""
+        # 기존 재전송이 있으면 중지
+        self.stop_b4_retry()
+        
+        self.b4_retry_active = True
+        self.b4_retry_packet = packet
+        self.b4_retry_start_time = time.time()
+        
+        # 재전송 스레드 시작
+        self.b4_retry_thread = threading.Thread(target=self._b4_retry_worker, daemon=True)
+        self.b4_retry_thread.start()
+    
+    def stop_b4_retry(self):
+        """CMD 0xB4 재전송 중지"""
+        self.b4_retry_active = False
+        self.b4_retry_packet = None
+        self.b4_retry_start_time = None
+    
+    def _b4_retry_worker(self):
+        """CMD 0xB4 재전송 작업자 스레드"""
+        while self.b4_retry_active and self.is_connected:
+            try:
+                # 타임아웃 체크
+                if self.b4_retry_start_time is not None:
+                    elapsed = time.time() - self.b4_retry_start_time
+                    if elapsed >= self.b4_retry_timeout:
+                        self.b4_retry_active = False
+                        self.status_queue.put(('SYSTEM', f"CMD 0xB4 재전송 타임아웃 ({self.b4_retry_timeout}초)"))
+                        break
+                
+                # 패킷 재전송
+                if self.b4_retry_packet:
+                    self.priority_send_queue.put(self.b4_retry_packet)
+                
+                # 재전송 간격만큼 대기
+                time.sleep(self.b4_retry_interval)
+                
+            except Exception as e:
+                if self.b4_retry_active:
+                    self.status_queue.put(('ERROR', f"CMD 0xB4 재전송 오류: {str(e)}"))
+                break
     
     def _receive_worker(self):
         """데이터 수신 스레드"""
@@ -1061,12 +1436,25 @@ class SerialCommunication:
                 break
     
     def _send_worker(self):
-        """데이터 송신 스레드"""
+        """데이터 송신 스레드 (우선순위 큐를 먼저 처리)"""
         while not self.stop_thread and self.is_connected:
             try:
-                data = self.send_queue.get(timeout=0.1)
+                data = None
                 
-                if self.serial_connection and self.serial_connection.is_open:
+                # 우선순위 큐를 먼저 확인 (non-blocking)
+                try:
+                    data = self.priority_send_queue.get_nowait()
+                except queue.Empty:
+                    # 우선순위 큐가 비어있으면 일반 큐에서 가져오기 (짧은 timeout으로 우선순위 큐를 자주 확인)
+                    try:
+                        data = self.send_queue.get(timeout=0.01)  # timeout을 0.01초로 줄여서 우선순위 큐를 자주 확인
+                    except queue.Empty:
+                        # 둘 다 비어있으면 잠시 대기 후 다시 확인
+                        time.sleep(0.01)
+                        continue
+                
+                # 패킷 전송 처리
+                if data and self.serial_connection and self.serial_connection.is_open:
                     # 패킷 검증: STX와 ETX가 포함되어 있는지 확인
                     if len(data) >= 2:
                         if data[0] != self.protocol.STX:

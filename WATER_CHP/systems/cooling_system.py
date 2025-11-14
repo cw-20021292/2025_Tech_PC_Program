@@ -131,12 +131,22 @@ class CoolingSystem:
         return cooling_frame
     
     def _validate_number(self, value):
-        """숫자와 소숫점 입력 가능하도록 검증"""
+        """숫자와 소숫점 입력 가능하도록 검증 (소숫점 첫째 자리만 허용)"""
         if value == "":
             return True
         try:
+            # 소숫점이 2개 이상이면 안됨
             if value.count('.') > 1:
                 return False
+            # 소숫점이 있으면 소수 부분이 첫째 자리(1자리)까지만 허용
+            if '.' in value:
+                parts = value.split('.')
+                if len(parts) != 2:
+                    return False
+                # 소수 부분(parts[1])이 1자리를 초과하면 안됨
+                decimal_part = parts[1]
+                if len(decimal_part) > 1:
+                    return False
             float(value)
             return True
         except ValueError:
@@ -179,59 +189,76 @@ class CoolingSystem:
             try:
                 # 입력 값 가져오기
                 target_rps_str = self.labels['target_rps'].get()
-                target_temp_str = self.labels.get('target_temp', None)
-                if target_temp_str is None or not hasattr(target_temp_str, 'get'):
-                    # target_temp가 없으면 on_temp를 사용 (임시)
-                    target_temp_str = self.labels['on_temp'].get()
-                else:
-                    target_temp_str = target_temp_str.get()
                 on_temp_str = self.labels['on_temp'].get()
+                off_temp_str = self.labels['off_temp'].get()
+                additional_time_str = self.labels['cooling_additional_time'].get()
                 
                 # 빈 값 체크
-                if not target_rps_str or not target_temp_str or not on_temp_str:
+                if not target_rps_str or not on_temp_str or not off_temp_str or not additional_time_str:
                     messagebox.showwarning("경고", "모든 값을 입력해주세요.")
                     return
                 
+                # 온도 값 처리 (소숫점 첫째 자리만 허용, 10을 곱해서 정수로 변환)
+                on_temp_float = float(on_temp_str)
+                off_temp_float = float(off_temp_str)
+                on_temp_int = int(on_temp_float * 10)  # 5.5 → 55
+                off_temp_int = int(off_temp_float * 10)  # 25.5 → 255
+                
                 # 정수로 변환
                 target_rps = int(float(target_rps_str))
-                target_temp = int(float(target_temp_str))
-                on_temp = int(float(on_temp_str))
-                cooling_operation = 1 if self.data['operation_state'] == 'GOING' else 0
+                additional_time = int(float(additional_time_str))
                 
                 # 범위 체크
                 if not (constants.RPS_MIN <= target_rps <= constants.RPS_MAX):
                     messagebox.showwarning("경고", f"목표 RPS는 {constants.RPS_MIN}~{constants.RPS_MAX} 범위여야 합니다.")
                     return
                 
-                if not (-127 <= target_temp <= 127):
-                    messagebox.showwarning("경고", "목표 온도는 -127~127℃ 범위여야 합니다.")
+                # 온도 범위 체크 (unsigned char: 0~255, 10을 곱한 값이 0~255 범위여야 함)
+                # 온도는 0.0~25.5℃ 범위 (10을 곱하면 0~255)
+                if not (0.0 <= on_temp_float <= 25.5):
+                    messagebox.showwarning("경고", "냉각 ON 온도는 0.0~25.5℃ 범위여야 합니다.")
                     return
                 
-                if not (-127 <= on_temp <= 127):
-                    messagebox.showwarning("경고", "냉각 ON 온도는 -127~127℃ 범위여야 합니다.")
+                if not (0.0 <= off_temp_float <= 25.5):
+                    messagebox.showwarning("경고", "냉각 OFF 온도는 0.0~25.5℃ 범위여야 합니다.")
                     return
                 
-                # DATA FIELD 구성 (4바이트)
-                data_field = bytearray(4)
-                data_field[0] = target_rps
-                data_field[1] = self.comm.protocol.int_to_signed_byte(target_temp)  # TARGET TEMP (signed byte)
-                data_field[2] = cooling_operation  # 냉각 동작 (0: STOP, 1: GOING)
-                data_field[3] = self.comm.protocol.int_to_signed_byte(on_temp)  # 냉각 ON 온도 (signed byte)
+                # unsigned char 범위 체크 (0~255)
+                if not (0 <= on_temp_int <= 255):
+                    messagebox.showwarning("경고", "냉각 ON 온도 값이 범위를 벗어났습니다 (0~255).")
+                    return
+                
+                if not (0 <= off_temp_int <= 255):
+                    messagebox.showwarning("경고", "냉각 OFF 온도 값이 범위를 벗어났습니다 (0~255).")
+                    return
+                
+                # 추가시간 범위 체크 (0 ~ 65535)
+                if not (0 <= additional_time <= 65535):
+                    messagebox.showwarning("경고", "추가시간은 0~65535초 범위여야 합니다.")
+                    return
+                
+                # DATA FIELD 구성 (5바이트)
+                data_field = bytearray(5)
+                data_field[0] = target_rps  # DATA 1: Target RPS
+                data_field[1] = on_temp_int & 0xFF  # DATA 2: 냉각 ON 온도 (unsigned char, 10을 곱한 값)
+                data_field[2] = off_temp_int & 0xFF  # DATA 3: 냉각 OFF 온도 (unsigned char, 10을 곱한 값)
+                data_field[3] = (additional_time >> 8) & 0xFF  # DATA 4: 추가시간 High값
+                data_field[4] = additional_time & 0xFF  # DATA 5: 추가시간 Low값
                 
                 # 로그 출력
                 hex_data = " ".join([f"{b:02X}" for b in data_field])
-                self.log_communication(f"[냉각 제어] CMD 0xB1 전송 (4바이트)", "blue")
+                self.log_communication(f"[냉각 제어] CMD 0xB1 전송 (5바이트)", "blue")
                 self.log_communication(f"  목표 RPS: {target_rps}", "gray")
-                self.log_communication(f"  목표 온도: {target_temp}℃", "gray")
-                self.log_communication(f"  냉각 동작: {'GOING' if cooling_operation == 1 else 'STOP'}", "gray")
-                self.log_communication(f"  냉각 ON 온도: {on_temp}℃", "gray")
+                self.log_communication(f"  냉각 ON 온도: {on_temp_float}℃ (전송값: {on_temp_int})", "gray")
+                self.log_communication(f"  냉각 OFF 온도: {off_temp_float}℃ (전송값: {off_temp_int})", "gray")
+                self.log_communication(f"  추가시간: {additional_time}초", "gray")
                 self.log_communication(f"  DATA FIELD (HEX): {hex_data}", "gray")
                 
-                # CMD 0xB1 패킷 전송
-                success, message = self.comm.send_packet(0xB1, bytes(data_field))
+                # CMD 0xB1 패킷 전송 (우선순위, 응답을 받을 때까지 재전송)
+                success, message = self.comm.send_packet(0xB1, bytes(data_field), priority=True, retry_until_response=True)
                 
                 if success:
-                    self.log_communication(f"  전송 성공 (CMD 0xB1, 4바이트)", "green")
+                    self.log_communication(f"  전송 요청 성공 (CMD 0xB1, 5바이트, 우선순위 큐 추가됨)", "green")
                     
                     # 입력 모드 비활성화
                     self.edit_mode = False

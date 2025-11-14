@@ -10,6 +10,7 @@
 #include    "Global_Variable.h"
 #include    "Port_Define.h"
 #include    "Comp_Control.h"
+#include    "App_Comm_Protocol.h"
 
 void output_comp_control(void);
 void comp_stable_check(void);
@@ -634,6 +635,12 @@ U8 get_cold_mode_comp_rps(void)
     {
         /*..hui [23-4-7오전 11:16:14] 30도 초과..*/
         mu8_return = BLDC_COMP_45Hz;                    /* V18 냉각테이블 */
+    }
+
+    /* CH.PARK 냉각 검토 고정값 데이터 반영 */
+    if(GetB1ColdTargetRPS() > 0)
+    {
+        mu8_return = GetB1ColdTargetRPS();
     }
 
     return mu8_return;
