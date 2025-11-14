@@ -10,8 +10,8 @@
 
 #include "hal_serial.h"
 
-#define UART0_RX_BUFFER_SIZE    128
-#define UART0_TX_BUFFER_SIZE    128
+#define UART0_RX_BUFFER_SIZE    256
+#define UART0_TX_BUFFER_SIZE    256
 
 #define UART3_RX_BUFFER_SIZE    256
 #define UART3_TX_BUFFER_SIZE    256

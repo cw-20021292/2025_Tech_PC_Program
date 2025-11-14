@@ -14,7 +14,7 @@
 #include    "M9_Front_Communication.h"
 
 #if 1
-/* @TODO : 외부 변수 참조 및 헤더 참조 */
+/* @TODO : 유저용) 외부 변수 참조 및 헤더 참조 */
 extern U8 get_cold_mode_comp_rps(void);
 extern U8 get_ice_mode_comp_rps(void);
 extern U8 gu8BLDCErrorNum;
