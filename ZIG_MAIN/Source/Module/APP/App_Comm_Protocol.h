@@ -10,6 +10,17 @@
 
 #include "api_uart.h"
 
+#define COMM_PROTOCOL_STX        0x02
+#define COMM_PROTOCOL_ETX        0x03
+#define COMM_PROTOCOL_ID_PC      0x01
+#define COMM_PROTOCOL_ID_MAIN    0x02
+#define COMM_PROTOCOL_ID_FRONT   0x03
+
+#define COMM_PROTOCOL_PACKET_BASIC_LENGTH          7
+
+#define GET_16_HIGH_BYTE(val)       (U8)(((val)&0xFF00) >> 8)
+#define GET_16_LOW_BYTE(val)        (U8)((val)&0x00FF)
+
 typedef enum
 {
     PROTOCOL_IDX_STX = 0,
@@ -235,8 +246,8 @@ typedef struct
     U8 u8TrayPosition;         // 보냉 트레이 위치
 } B4_ICE_STORAGE_TABLE_DATA_FIELD;
 
-U8 Protocol_Make_Ack_Packet(U8* buf, U8* Txbuf);
-U8 Protocol_Make_Cmd(U8 *buf);
+U8 Protocol_isValidPacket(U8 *buf);
+U8 Protocol_Make_Ack_Packet(U8 *buf, U8 *tx_buf);
 
 U8 GetB1ColdTargetRPS(void);
 void SetB1ColdTargetRPS(U8 *u8ColdTargetRPS);
