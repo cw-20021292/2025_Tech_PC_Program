@@ -1,16 +1,16 @@
 /**
  * File : hal_serial.c
- *
+ * BaudRate : 9600bps
  * Hardware Abstraction Layer
  * Depend on Renesas MCU Chip
 */
 
-#if 0
+#ifdef USE_UART0_MODULE
 #pragma interrupt INTST0 HAL_Uart0_interrupt_send
 #pragma interrupt INTSR0 HAL_Uart0_interrupt_receive
 #endif
 
-#if 1
+#ifdef USE_UART3_MODULE
 #pragma interrupt INTST3 HAL_Uart3_interrupt_send
 #pragma interrupt INTSR3 HAL_Uart3_interrupt_receive
 #endif
